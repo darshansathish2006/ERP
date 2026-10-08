@@ -1,0 +1,9 @@
+node_modules/
+client/dist/
+data/
+*.db
+*.mp4
+.env
+*.log
+.DS_Store
+Thumbs.db

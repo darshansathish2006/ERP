@@ -1,9 +1,13 @@
-import { useMemo } from 'react';
-import { Layers } from 'lucide-react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { Edit3, Layers, Lock, Plus, Trash2 } from 'lucide-react';
 import type { ItemDef, SystemDef } from '../../lib/types';
-import { Badge, Empty } from '../../components/ui';
+import { api, errorMessage } from '../../lib/api';
+import { Badge, Button, Empty, IconButton } from '../../components/ui';
+import { useConfirm, useToast } from '../../components/feedback';
 import { useMasters } from '../../context/MastersContext';
 import { inr } from '../../lib/format';
+import { SystemModal } from './SystemModal';
+import { useMasterUsage, usageText } from './shared';
 
 const ROLE_LABELS: Record<string, string> = {
   frame: 'Outer frame',
@@ -28,28 +32,92 @@ function roleLabel(role: string) {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-export function SystemsTab() {
-  const { masters } = useMasters();
+export function SystemsTab({ readOnly = false }: { readOnly?: boolean }) {
+  const { masters, refresh } = useMasters();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [modal, setModal] = useState<{ system?: SystemDef } | null>(null);
+  const { usage, refresh: refreshUsage } = useMasterUsage();
   const itemsByCode = useMemo(() => new Map(masters.items.map((i) => [i.code, i])), [masters.items]);
-  if (!masters.systems.length) {
-    return (
-      <div className="list-card">
-        <Empty title="No profile systems configured" icon={<Layers size={30} strokeWidth={1.4} />} />
-      </div>
-    );
+
+  async function remove(s: SystemDef) {
+    const ok = await confirm({
+      title: 'Delete profile system?',
+      message: (
+        <>
+          <b>{s.name}</b> will no longer be offered for designs.
+        </>
+      ),
+      confirmText: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.del(`/api/masters/systems/${encodeURIComponent(s.id)}`);
+      await refresh();
+      await refreshUsage();
+      toast.success(`${s.name} deleted`);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
   }
+
+  const addButton = (
+    <Button size="sm" variant="outline-primary" icon={<Plus size={14} />} onClick={() => setModal({})} data-tour="masters-add-system">
+      Add system
+    </Button>
+  );
+
   return (
-    <div className="adm-scroll">
-      <div className="adm-systems">
-        {masters.systems.map((s) => (
-          <SystemCard key={s.id} system={s} itemsByCode={itemsByCode} />
-        ))}
+    <div className="list-card">
+      <div className="toolbar adm-toolbar">
+        <span className="adm-toolbar-note">
+          {masters.systems.length} system{masters.systems.length === 1 ? '' : 's'} · the profiles each role uses and the size limits checked in the configurator
+        </span>
+        <div className="adm-toolbar-spacer" />
+        {readOnly ? <span className="adm-toolbar-note">View only</span> : addButton}
       </div>
+      <div className="adm-scroll" data-tour="masters-systems">
+        {!masters.systems.length ? (
+          <Empty title="No profile systems configured" icon={<Layers size={30} strokeWidth={1.4} />}>
+            {!readOnly && addButton}
+          </Empty>
+        ) : (
+          <div className="adm-systems">
+            {masters.systems.map((s) => (
+              <SystemCard
+                key={s.id}
+                system={s}
+                itemsByCode={itemsByCode}
+                actions={
+                  readOnly ? null : (
+                    <span className="row gap-4" style={{ flexWrap: 'nowrap' }}>
+                      <IconButton size="sm" tip="Edit system" tipPos="left" onClick={() => setModal({ system: s })} data-tour="masters-system-edit">
+                        <Edit3 size={13} />
+                      </IconButton>
+                      {usage?.systems[s.id] ? (
+                        <IconButton size="sm" tip={`${usageText(usage.systems[s.id])} – cannot be deleted`} tipPos="left" aria-label={`${s.name} is in use`} disabled>
+                          <Lock size={13} />
+                        </IconButton>
+                      ) : (
+                        <IconButton size="sm" tip="Delete system" tipPos="left" onClick={() => void remove(s)} disabled={!usage}>
+                          <Trash2 size={13} />
+                        </IconButton>
+                      )}
+                    </span>
+                  )
+                }
+              />
+            ))}
+          </div>
+        )}
+      </div>
+      {modal && <SystemModal system={modal.system} onClose={() => setModal(null)} onSaved={() => void refreshUsage()} />}
     </div>
   );
 }
 
-function SystemCard({ system: s, itemsByCode }: { system: SystemDef; itemsByCode: Map<string, ItemDef> }) {
+function SystemCard({ system: s, itemsByCode, actions }: { system: SystemDef; itemsByCode: Map<string, ItemDef>; actions?: ReactNode }) {
   const roles = Object.entries(s.roles || {});
   const l = s.limits;
   return (
@@ -61,6 +129,7 @@ function SystemCard({ system: s, itemsByCode }: { system: SystemDef; itemsByCode
             <div className="adm-system-name">{s.name}</div>
           </div>
           <Badge tone={s.type === 'sliding' ? 'primary' : 'success'}>{s.type === 'sliding' ? 'Sliding' : 'Casement'}</Badge>
+          {actions}
         </div>
         {l && (
           <div className="adm-limits">

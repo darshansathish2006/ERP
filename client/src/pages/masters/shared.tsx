@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { api } from '../../lib/api';
 import { Search, X } from 'lucide-react';
 import type { ColorDef } from '../../lib/types';
 
@@ -96,3 +97,32 @@ export function ColorSwatch({ color, size = 44 }: { color: Pick<ColorDef, 'hex_i
 export const UNITS = ['Meter', 'Pcs', 'Set', 'CAN', 'SQMT'] as const;
 
 export const CODE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/** Why master records are locked (used by systems, the BOM rules, designs …), keyed by code / id. */
+export interface MasterUsage {
+  items: Record<string, string[]>;
+  glasses: Record<string, string[]>;
+  colors: Record<string, string[]>;
+  systems: Record<string, string[]>;
+}
+
+/** Loads /api/masters/usage; refresh() after adding, editing or deleting records. */
+export function useMasterUsage(): { usage: MasterUsage | null; refresh: () => Promise<void> } {
+  const [usage, setUsage] = useState<MasterUsage | null>(null);
+  const refresh = useCallback(async () => {
+    try {
+      setUsage(await api.get<MasterUsage>('/api/masters/usage'));
+    } catch {
+      setUsage({ items: {}, glasses: {}, colors: {}, systems: {} });
+    }
+  }, []);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+  return { usage, refresh };
+}
+
+/** "Used by A; B" tooltip text for a locked record. */
+export function usageText(reasons: string[] | undefined): string {
+  return reasons?.length ? `Used by ${reasons.join('; ')}` : '';
+}

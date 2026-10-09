@@ -10,6 +10,8 @@ import opportunityRoutes from './routes/opportunities.js';
 import quoteRoutes, { publicRoutes } from './routes/quotes.js';
 import dashboardRoutes from './routes/dashboard.js';
 import adminRoutes from './routes/admin.js';
+import quoteExtrasRoutes from './routes/quoteExtras.js';
+import contactRoutes from './routes/contacts.js';
 
 const PORT = Number(process.env.PORT) || 4000;
 const fresh = ensureSeeded();
@@ -26,6 +28,8 @@ app.use('/api', requireAuth, opportunityRoutes);
 app.use('/api', requireAuth, quoteRoutes);
 app.use('/api', requireAuth, dashboardRoutes);
 app.use('/api', requireAuth, adminRoutes);
+app.use('/api', requireAuth, quoteExtrasRoutes);
+app.use('/api', requireAuth, contactRoutes);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
 // Serve the built client (npm run build) for production use.

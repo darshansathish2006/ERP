@@ -9,6 +9,7 @@ import './styles/quote.css';
 import './styles/configurator.css';
 import './styles/reports.css';
 import './styles/admin.css';
+import './styles/entries.css';
 import App from './App';
 
 createRoot(document.getElementById('root')!).render(

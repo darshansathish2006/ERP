@@ -275,32 +275,4 @@ router.delete('/opportunities/:id', requirePermission('opportunity.delete'), (re
   res.json({ ok: true });
 });
 
-router.get('/contacts', (req, res) => {
-  const q = str(req.query.q, 100);
-  const page = Math.max(1, intParam(req.query.page, 1));
-  const pageSize = Math.min(200, Math.max(5, intParam(req.query.pageSize, 25)));
-  const where = q ? 'WHERE (first_name || \' \' || COALESCE(last_name, \'\')) LIKE ? OR phone LIKE ? OR email LIKE ? OR city LIKE ?' : '';
-  const params = q ? Array(4).fill(`%${q}%`) : [];
-  const base = `
-    SELECT salutation, first_name, last_name, phone_code, phone, MAX(email) AS email, MAX(city) AS city, MAX(state) AS state,
-      COUNT(*) AS opportunities, SUM(CASE WHEN status = 'won' THEN 1 ELSE 0 END) AS won, MAX(created_at) AS last_activity,
-      MAX(id) AS last_opportunity_id
-    FROM opportunities ${where}
-    GROUP BY phone, first_name, last_name`;
-  const total = get(`SELECT COUNT(*) c FROM (${base})`, ...params).c;
-  const rows = all(`${base} ORDER BY last_activity DESC LIMIT ? OFFSET ?`, ...params, pageSize, (page - 1) * pageSize).map((r) => ({
-    name: [r.salutation, r.first_name, r.last_name].filter(Boolean).join(' '),
-    phone: `${r.phone_code} ${r.phone}`,
-    email: r.email || '',
-    city: r.city,
-    state: r.state,
-    opportunities: r.opportunities,
-    won: r.won,
-    lastActivity: r.last_activity,
-    lastOpportunityId: r.last_opportunity_id,
-    search: r.phone,
-  }));
-  res.json({ rows, total, page, pageSize });
-});
-
 export default router;

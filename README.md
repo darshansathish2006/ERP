@@ -20,15 +20,17 @@ For development with hot reload, run `npm run dev`. The API runs on :4000 and th
 
 **Login:** `titanswindows1@gmail.com` / `Titans@123`
 
-The first start creates `data/titans.db` and seeds:
-- master data: systems, profiles, hardware, glass, colours and price structures
-- 23 library designs
-- demo opportunities, quotes and designs, so the dashboard has data to show
+The first start creates `data/titans.db` with:
+- master data: systems, profiles, hardware, glass, colours, price levels and price structures
+- 23 library designs (ready-made window templates)
+- the admin login
+
+There is no demo or sample data. Opportunities, quotes and contacts start empty, ready for real work.
 
 | Command | What it does |
 |---|---|
-| `npm run seed` | Wipe the database and reseed it with demo data |
-| `npm run reset` | Wipe the database and keep only master data and the admin login (start fresh for real use) |
+| `npm run clear-data` | Delete every opportunity, quote, design, document, touchpoint and contact. Rates, masters, library designs, settings and user logins are kept, and quote numbering restarts. Stop the server first. |
+| `npm run reset` | Wipe the whole database back to the original master data and the admin login. Edited rates and settings are lost. |
 | `npm run test:engine` | Check the pricing engine against the reference quotation |
 
 ## Deploy on Render (test link)
@@ -43,20 +45,28 @@ Every push to the connected branch redeploys automatically.
 
 **Free plan limits:**
 - The service sleeps after 15 minutes without traffic, and the first request after that takes about a minute to load.
-- There is no persistent disk. The database is recreated with demo data on every deploy, restart or wake from sleep, so testers' changes do not last.
+- There is no persistent disk. The database starts empty again (master data and admin login only) on every deploy, restart or wake from sleep, so testers' changes do not last.
 - To keep data, move to a paid plan, add a disk and set `TITANS_DATA_DIR` (see the comments in `render.yaml`).
 
 Optional environment variables:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `TITANS_ADMIN_PASSWORD` | `Titans@123` | Password for the admin login (and the demo sales users) when the database is first created |
+| `TITANS_ADMIN_PASSWORD` | `Titans@123` | Password for the admin login when the database is first created |
 | `TITANS_DATA_DIR` | `./data` | Folder for `titans.db` and uploaded images |
-| `TITANS_NO_DEMO` | unset | Set to `1` to skip demo opportunities on a fresh database |
 | `PORT` | `4000` | Set automatically by Render |
 
 ## What's included
 
+- **Guided tour and Guide tab.**
+  - Every new user gets a welcome prompt on first login and a step-by-step spotlight tour of every page. A temporary sample project is created for the tour and deleted automatically afterwards.
+  - The **Guide** tab in the sidebar holds the full written guide (13 chapters plus questions and answers) with search, a "Show me" tour per chapter and "Start full tour".
+  - The top-bar **?** opens the Guide, and **▶** starts the tour for the current page.
+- **Add and edit everywhere.**
+  - Quote rate pages (profile, reinforcement, hardware, glass, mesh) have **Add entry** for extra items with qty × rate. The cost is added to that category's cost head.
+  - The quote price structure has **Add cost head** for extra charges (fixed ₹, ₹ per window, ₹ per sqft or % of a head).
+  - Designs have add-on costs. Contacts, touchpoints, documents, items, glass, colours, profile systems, library designs, teams, bank accounts, vehicles and price structures can all be added, edited and deleted.
+- **uPVC drawings.** 2D drawings, icons, the 3D view and the reports show white multi-chamber uPVC profiles, with welded corners, glazing bead, EPDM gasket and drainage slots. Laminated colours keep their woodgrain finish.
 - **Login.** Includes "Keep me signed in", forgot/reset password and create account. Email isn't configured, so the reset link is shown on screen and printed in the server console.
 - **Dashboard.** Shows:
   - KPI cards: created, newly quoted, won and lost

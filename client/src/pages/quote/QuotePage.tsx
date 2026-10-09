@@ -202,7 +202,7 @@ export default function QuotePage() {
         <button className="btn btn-ghost btn-sm" onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/opportunity'))}>
           <ChevronLeft size={15} /> Back
         </button>
-        <div className="quote-title" onClick={() => navigate(`/opportunity/${q.opportunityId}/edit`)} title="Edit opportunity">
+        <div className="quote-title" data-tour="quote-title" onClick={() => navigate(`/opportunity/${q.opportunityId}/edit`)} title="Edit opportunity">
           <div className="quote-project">
             {q.projectName}
             {status !== 'active' && <span className={`badge ${status === 'won' ? 'badge-success' : 'badge-danger'}`} style={{ marginLeft: 8 }}>{status === 'won' ? 'Won' : 'Lost'}</span>}
@@ -214,7 +214,7 @@ export default function QuotePage() {
         <Menu
           placement="bottom-start"
           trigger={({ ref, onClick }) => (
-            <button ref={ref} className="rev-chip" onClick={onClick} title="Quote revisions">
+            <button ref={ref} className="rev-chip" onClick={onClick} title="Quote revisions" data-tour="quote-revisions">
               Rev {q.revisionNo}
               {q.revisionTitle ? ` · ${q.revisionTitle}` : ''}
               {q.isDefault && <span className="rev-default">Default</span>}
@@ -241,7 +241,7 @@ export default function QuotePage() {
           ]}
         />
         <div className="grow" />
-        <button ref={cartRef} className="quote-cart" onClick={() => setCartOpen((o) => !o)} aria-label="Quote summary">
+        <button ref={cartRef} className="quote-cart" data-tour="quote-cart" onClick={() => setCartOpen((o) => !o)} aria-label="Quote summary">
           <ShoppingBasket size={18} />
           <span className="col" style={{ gap: 0, alignItems: 'flex-start' }}>
             <b>{inr(data.summary.grand)}</b>
@@ -293,13 +293,13 @@ export default function QuotePage() {
             </div>
           </div>
         </Popover>
-        <div className="split-btn">
+        <div className="split-btn" data-tour="quote-quick">
           <Button variant="success" size="sm" onClick={() => window.open(`/report/${quoteId}/quotation`, '_blank')} disabled={!data.designs.length}>
             Quick quote
           </Button>
           <Menu
             trigger={({ ref, onClick }) => (
-              <Button ref={ref} variant="success" size="sm" onClick={onClick} aria-label="More quote actions">
+              <Button ref={ref} variant="success" size="sm" onClick={onClick} aria-label="More quote actions" data-tour="quote-quick-menu">
                 <ChevronDown size={14} />
               </Button>
             )}
@@ -308,7 +308,7 @@ export default function QuotePage() {
         </div>
         <TopbarActions />
       </header>
-      <nav className="quote-tabs">
+      <nav className="quote-tabs" data-tour="quote-tabs">
         {TABS.map((t) => (
           <button key={t.value} className={`quote-tab ${tab === t.value ? 'active' : ''}`} onClick={() => setTab(t.value)}>
             {t.icon}

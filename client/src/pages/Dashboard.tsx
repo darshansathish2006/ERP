@@ -169,6 +169,7 @@ export default function DashboardPage() {
           </span>
           <Button
             ref={filterRef}
+            data-tour="dash-filter"
             size="sm"
             icon={<Filter size={13} />}
             onClick={() => {
@@ -238,14 +239,14 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="dash-kpis">
+      <div className="dash-kpis" data-tour="dash-kpis">
         <Kpi count={data.kpis.created.count} label="Created opportunity" value={data.kpis.created.value} icon={<Lightbulb size={20} />} tone="blue" />
         <Kpi count={data.kpis.quoted.count} label="Newly quoted" value={data.kpis.quoted.value} icon={<FileText size={20} />} tone="teal" />
         <Kpi count={data.kpis.won.count} label="Won opportunity" value={data.kpis.won.value} icon={<ThumbsUp size={20} />} tone="green" />
         <Kpi count={data.kpis.lost.count} label="Lost opportunity" value={data.kpis.lost.value} icon={<LightbulbOff size={20} />} tone="red" />
       </div>
 
-      <div className="dash-grid dash-grid-2-1">
+      <div className="dash-grid dash-grid-2-1" data-tour="dash-analytics">
         <Panel
           title="Sales analytics"
           action={
@@ -308,7 +309,7 @@ export default function DashboardPage() {
         </Panel>
       </div>
 
-      <div className="dash-grid dash-grid-3">
+      <div className="dash-grid dash-grid-3" data-tour="dash-insights">
         <Panel
           title={
             <span>
@@ -390,7 +391,7 @@ export default function DashboardPage() {
         </Panel>
       </div>
 
-      <div className="dash-grid dash-grid-2">
+      <div className="dash-grid dash-grid-2" data-tour="dash-stages">
         <Panel title="All active opportunities in various stages">
           {data.stages.length === 0 ? (
             <Empty />
@@ -447,7 +448,7 @@ export default function DashboardPage() {
         </Panel>
       </div>
 
-      <div className="dash-grid dash-grid-2">
+      <div className="dash-grid dash-grid-2" data-tour="dash-teams">
         <Panel title="Teams Performance">
           {data.teamsPerformance.length === 0 ? (
             <Empty />

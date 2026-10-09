@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowDown, ArrowUp, GripVertical } from 'lucide-react';
+import { ArrowDown, ArrowUp, GripVertical, Plus } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import type { BomLine, CutLine, Design, FullQuote, HeadValue, PaneLine } from '../../lib/types';
 import { fixed2, inr, qtyFmt } from '../../lib/format';
@@ -9,6 +9,7 @@ import { Button, Field, IconButton, Input, Select, Spinner, Tabs } from '../../c
 import { Drawer, Modal } from '../../components/overlay';
 import { Combobox } from '../../components/Combobox';
 import { DesignSvg } from '../../configurator/DesignSvg';
+import { DesignAddonDialog } from './pricing/AddonPage';
 
 export type GlobalField = 'colorId' | 'glassId' | 'systemId' | 'qty' | 'location';
 const FIELD_LABEL: Record<GlobalField, string> = {
@@ -281,10 +282,29 @@ interface DesignDetail {
   price: { heads: HeadValue[]; basic: number; grand: number; sqftRate: number; autoBasic: number };
 }
 
-export function DesignDetailsDrawer({ designId, onClose, onEdit }: { designId: number | null; onClose: () => void; onEdit: (id: number) => void }) {
+export function DesignDetailsDrawer({
+  designId,
+  onClose,
+  onEdit,
+  onChanged,
+}: {
+  designId: number | null;
+  onClose: () => void;
+  onEdit: (id: number) => void;
+  /** Called after the design's extra costs change (so the quote can reload its totals). */
+  onChanged?: () => void;
+}) {
   const toast = useToast();
   const [data, setData] = useState<DesignDetail | null>(null);
   const [tab, setTab] = useState<'summary' | 'bom' | 'cuts'>('summary');
+  const [addonOpen, setAddonOpen] = useState(false);
+  const refresh = async (id: number) => {
+    try {
+      setData(await api.get<DesignDetail>(`/api/designs/${id}`));
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  };
   useEffect(() => {
     if (designId == null) return;
     setData(null);
@@ -336,6 +356,30 @@ export function DesignDetailsDrawer({ designId, onClose, onEdit }: { designId: n
                 <tr><td className="muted">Shutter weight</td><td>{d.sashes.map((s) => `${s.label}-${s.weight}`).join('; ') || '—'} {d.sashes.length ? 'kg' : ''}</td></tr>
                 <tr><td className="muted">Unit price</td><td className="fw-600">{inr(d.unitPrice)} <span className="muted fs-12">({inr(d.sqftRate)}/sqft basic)</span></td></tr>
                 <tr><td className="muted">Total</td><td className="fw-600">{inr(d.totalPrice)}</td></tr>
+                <tr>
+                  <td className="muted">Extra costs</td>
+                  <td>
+                    <div className="row wrap gap-4">
+                      {d.addons.map((a, i) => (
+                        <span key={i} className="badge badge-primary">
+                          {a.name}: {inr(a.amount)}
+                          {a.basis === 'sqft' ? '/sqft' : '/unit'}
+                        </span>
+                      ))}
+                      <Button size="xs" variant="outline-primary" icon={<Plus size={12} />} onClick={() => setAddonOpen(true)} data-tour="design-addon-edit">
+                        {d.addons.length ? 'Edit extra costs' : 'Add extra cost'}
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+                {(d.addedShare ?? 0) > 0.005 && (
+                  <tr>
+                    <td className="muted">Added entries</td>
+                    <td className="fs-12">
+                      {inr(d.addedShare)} per unit <span className="muted">· share of the entries added on the Pricing rate pages</span>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -427,8 +471,23 @@ export function DesignDetailsDrawer({ designId, onClose, onEdit }: { designId: n
           )}
         </div>
       )}
+      {addonOpen && d && (
+        <DetailsAddonDialog
+          design={d}
+          onClose={() => setAddonOpen(false)}
+          onSaved={async () => {
+            await refresh(d.id);
+            onChanged?.();
+          }}
+        />
+      )}
     </Drawer>
   );
+}
+
+/** Opened from the design details drawer: the design's add-on cost heads. */
+function DetailsAddonDialog({ design, onClose, onSaved }: { design: Design; onClose: () => void; onSaved: () => Promise<void> }) {
+  return <DesignAddonDialog design={{ id: design.id, ref: design.ref, name: design.name, areaSqft: design.areaSqft, addons: design.addons }} onClose={onClose} onSaved={onSaved} />;
 }
 
 function GroupRows({ title, lines }: { title: string; lines: BomLine[] }) {

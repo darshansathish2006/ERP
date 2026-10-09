@@ -111,11 +111,12 @@ export function ManualRatePage({ quoteId, designs, onSaved, canEdit = true }: { 
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <div className="pricing-title">Design Manual Rate</div>
       </div>
+      {!canEdit && <div className="alert alert-info">You can view the manual rates. Ask an administrator for the "Apply manual rates" permission to change them.</div>}
       <div className="list-card" style={{ flex: 1, minHeight: 0 }}>
         {designs.length === 0 ? (
-          <div className="empty">No designs in this quote yet.</div>
+          <div className="empty">No designs in this quote yet. Add designs in the Design tab to set a manual SQFT rate.</div>
         ) : (
-          <div className="table-wrap" style={{ flex: 1 }}>
+          <div className="table-wrap" style={{ flex: 1 }} data-tour="manual-table">
             <table className="table manual-table">
               <thead>
                 <tr>
@@ -136,6 +137,8 @@ export function ManualRatePage({ quoteId, designs, onSaved, canEdit = true }: { 
                         size="sm"
                         tip="Apply single rate SQFT"
                         tipPos="left"
+                        disabled={!canEdit || !designs.length}
+                        data-tour="manual-rate-single"
                         onClick={() => {
                           setSingleError(null);
                           setSingle({ types: [], systems: [], all: false, value: '' });
@@ -179,7 +182,7 @@ export function ManualRatePage({ quoteId, designs, onSaved, canEdit = true }: { 
                             <option value="auto">Actual</option>
                             <option value="manual">Manual</option>
                           </select>
-                          <IconButton size="sm" tip="Reset to auto" onClick={() => resetRow(r.id)}>
+                          <IconButton size="sm" tip="Reset to auto" onClick={() => resetRow(r.id)} disabled={!canEdit}>
                             <RotateCcw size={13} />
                           </IconButton>
                         </span>
@@ -187,14 +190,14 @@ export function ManualRatePage({ quoteId, designs, onSaved, canEdit = true }: { 
                       <td>
                         <div className="row gap-4">
                           <div className="input-rupee" style={{ width: 130 }}>
-                            <Input sm type="number" min={0} step="0.01" value={r.basic} onChange={(e) => setBasic(r.id, e.target.value)} disabled={!manual} aria-label={`Manual basic price for ${d.ref}`} />
+                            <Input sm type="number" min={0} step="0.01" value={r.basic} onChange={(e) => setBasic(r.id, e.target.value)} disabled={!manual || !canEdit} aria-label={`Manual basic price for ${d.ref}`} />
                           </div>
                           <span className="muted fs-11">x{d.qty}</span>
                         </div>
                       </td>
                       <td>
                         <div className="input-rupee" style={{ width: 110 }}>
-                          <Input sm type="number" min={0} step="0.01" value={r.sqft} onChange={(e) => setSqft(r.id, e.target.value)} disabled={!manual} aria-label={`Manual SQFT rate for ${d.ref}`} />
+                          <Input sm type="number" min={0} step="0.01" value={r.sqft} onChange={(e) => setSqft(r.id, e.target.value)} disabled={!manual || !canEdit} aria-label={`Manual SQFT rate for ${d.ref}`} />
                         </div>
                       </td>
                     </tr>
@@ -219,8 +222,10 @@ export function ManualRatePage({ quoteId, designs, onSaved, canEdit = true }: { 
           </div>
         )}
         <div className="row" style={{ justifyContent: 'flex-end', padding: 12, borderTop: '1px solid var(--border)' }}>
-          <Button onClick={() => setRows(initial)}>Reset</Button>
-          <Button variant="primary" loading={saving} onClick={save} disabled={!designs.length}>
+          <Button onClick={() => setRows(initial)} disabled={!canEdit}>
+            Reset
+          </Button>
+          <Button variant="primary" loading={saving} onClick={save} disabled={!designs.length || !canEdit}>
             Save
           </Button>
         </div>

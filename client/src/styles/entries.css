@@ -1,0 +1,157 @@
+/* Add / edit entries: custom rate-page lines, added charges, contacts, masters editors. */
+
+/* ---- quote: rate pages ---- */
+.qi-amount {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px dashed var(--border-2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.table tbody.added-entries tr.added-head td {
+  background: var(--primary-50);
+  border-top: 2px solid var(--primary-100);
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.table tbody.added-entries tr.added-row td {
+  background: #fbfdff;
+}
+.table tbody.added-entries tr.added-row:hover td {
+  background: var(--primary-50);
+}
+
+/* ---- quote: added charges in the cost-head table ---- */
+.table tr.added-head-row td {
+  background: #f6fbf7;
+}
+.table tr.added-head-row td:first-child {
+  box-shadow: inset 3px 0 0 var(--success);
+}
+.charge-vehicle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+.charge-vehicle svg {
+  color: var(--primary);
+  flex: none;
+}
+.charge-estimate {
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--primary-50);
+  font-size: 12.5px;
+}
+
+/* ---- opportunity: touchpoints ---- */
+.touch-editing {
+  border-color: var(--primary-200) !important;
+  box-shadow: 0 0 0 3px var(--primary-50);
+}
+.touch-item.editing {
+  background: var(--primary-50);
+  border-radius: var(--radius);
+}
+
+/* ---- contacts ---- */
+.contact-grid {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px 14px;
+}
+.contact-grid > .field:nth-child(4) {
+  grid-column: 1;
+}
+.contact-span-2 {
+  grid-column: span 2;
+}
+.contact-span-3 {
+  grid-column: 1 / -1;
+}
+
+/* ---- masters: library edit, systems editor ---- */
+.adm-lib-edit {
+  position: absolute;
+  top: 6px;
+  right: 36px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border) !important;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.adm-lib-card:hover .adm-lib-edit,
+.adm-lib-edit:focus-visible {
+  opacity: 1;
+}
+.adm-lib-edit:hover {
+  color: var(--primary) !important;
+  background: var(--primary-50) !important;
+}
+.system-form-top {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr);
+  gap: 12px 14px;
+}
+.system-limits {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+.system-roles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+
+/* ---- settings: teams, bank accounts ---- */
+.adm-team-actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+.team-member-pick {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  max-height: 300px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.team-member-pick .checkbox {
+  min-width: 0;
+}
+.bank-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bank-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.bank-row .grow {
+  min-width: 0;
+}
+
+/* Modals opened from a drawer (add-on costs, confirmations) must sit above the drawer (z 1101). */
+.backdrop {
+  z-index: 1150;
+}

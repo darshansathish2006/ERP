@@ -1,12 +1,12 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { Plus, RotateCcw, Save } from 'lucide-react';
+import { Edit3, Lock, Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import type { ItemDef } from '../../lib/types';
-import { Badge, Button, Empty, Select } from '../../components/ui';
-import { useToast } from '../../components/feedback';
+import { Badge, Button, Empty, IconButton, Select } from '../../components/ui';
+import { useConfirm, useToast } from '../../components/feedback';
 import { useMasters } from '../../context/MastersContext';
 import { AddItemModal } from './AddItemModal';
-import { RateInput, SearchBox, isValidRate, numStr, parseNum } from './shared';
+import { RateInput, SearchBox, isValidRate, numStr, parseNum, useMasterUsage, usageText } from './shared';
 
 export type ItemCategory = ItemDef['category'];
 
@@ -39,6 +39,9 @@ export function ItemsTab({ category, onDirtyChange, readOnly = false }: { catego
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [saving, setSaving] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<ItemDef | null>(null);
+  const confirm = useConfirm();
+  const { usage, refresh: refreshUsage } = useMasterUsage();
 
   const items = useMemo(() => masters.items.filter((i) => i.category === category), [masters.items, category]);
   const groups = useMemo(() => [...new Set(items.map((i) => i.grp))], [items]);
@@ -62,7 +65,33 @@ export function ItemsTab({ category, onDirtyChange, readOnly = false }: { catego
     }
     return [...map].map(([grp, rows]) => ({ grp: grp as string | null, rows }));
   }, [category, visible]);
-  const colCount = 5 + (showBar ? 1 : 0) + (showLam ? 1 : 0);
+  const colCount = 5 + (showBar ? 1 : 0) + (showLam ? 1 : 0) + (readOnly ? 0 : 1);
+
+  async function remove(it: ItemDef) {
+    if (drafts[it.code]) {
+      toast.error('Save or discard the unsaved rate of this item first');
+      return;
+    }
+    const ok = await confirm({
+      title: 'Delete item?',
+      message: (
+        <>
+          <b>{it.code}</b> {it.name} will be removed from the rate master and from every price level.
+        </>
+      ),
+      confirmText: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.del(`/api/masters/items/${encodeURIComponent(it.code)}`);
+      await refresh();
+      await refreshUsage();
+      toast.success(`Item ${it.code} deleted`);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  }
 
   const changed = useMemo(() => items.filter((it) => isChanged(it, drafts[it.code])), [items, drafts]);
   const changedCodes = useMemo(() => new Set(changed.map((c) => c.code)), [changed]);
@@ -151,12 +180,30 @@ export function ItemsTab({ category, onDirtyChange, readOnly = false }: { catego
             )}
           </td>
         )}
+        {!readOnly && (
+          <td className="nowrap">
+            <span className="row gap-4" style={{ flexWrap: 'nowrap' }}>
+              <IconButton size="sm" tip="Edit item" tipPos="left" onClick={() => setEditing(it)} disabled={saving} data-tour="masters-item-edit">
+                <Edit3 size={13} />
+              </IconButton>
+              {usage?.items[it.code] ? (
+                <IconButton size="sm" tip={`${usageText(usage.items[it.code])} – cannot be deleted`} tipPos="left" aria-label={`${it.code} is in use`} disabled>
+                  <Lock size={13} />
+                </IconButton>
+              ) : (
+                <IconButton size="sm" tip="Delete item" tipPos="left" onClick={() => void remove(it)} disabled={saving || !usage}>
+                  <Trash2 size={13} />
+                </IconButton>
+              )}
+            </span>
+          </td>
+        )}
       </tr>
     );
   };
 
   return (
-    <div className="list-card">
+    <div className="list-card" data-tour="masters-items">
       <div className="toolbar adm-toolbar">
         <SearchBox value={search} onChange={setSearch} placeholder="Search code or item name" />
         {showGroupFilter && (
@@ -188,7 +235,7 @@ export function ItemsTab({ category, onDirtyChange, readOnly = false }: { catego
             <Button size="sm" variant="primary" icon={<Save size={14} />} onClick={() => void save()} disabled={!dirty} loading={saving}>
               Save changes
             </Button>
-            <Button size="sm" variant="outline-primary" icon={<Plus size={14} />} onClick={() => setAdding(true)}>
+            <Button size="sm" variant="outline-primary" icon={<Plus size={14} />} onClick={() => setAdding(true)} data-tour="masters-add-item">
               Add item
             </Button>
           </>
@@ -212,6 +259,7 @@ export function ItemsTab({ category, onDirtyChange, readOnly = false }: { catego
                   Laminated Rate (₹)
                 </th>
               )}
+              {!readOnly && <th style={{ width: 70 }} />}
             </tr>
           </thead>
           <tbody>
@@ -240,7 +288,8 @@ export function ItemsTab({ category, onDirtyChange, readOnly = false }: { catego
           </Empty>
         )}
       </div>
-      {adding && <AddItemModal category={category} onClose={() => setAdding(false)} />}
+      {adding && <AddItemModal category={category} onClose={() => setAdding(false)} onSaved={() => void refreshUsage()} />}
+      {editing && <AddItemModal category={category} item={editing} locked={usage?.items[editing.code]} onClose={() => setEditing(null)} onSaved={() => void refreshUsage()} />}
     </div>
   );
 }

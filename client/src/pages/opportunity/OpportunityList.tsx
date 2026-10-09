@@ -195,6 +195,20 @@ export default function OpportunityListPage() {
     { value: 'lost' as Tab, label: 'Lost', count: counts.lost ?? 0 },
     { value: 'all' as Tab, label: 'All', count: (counts.active ?? 0) + (counts.won ?? 0) + (counts.lost ?? 0) },
   ];
+  // nothing at all in range and no search/filter: guide the user to create their first opportunity
+  const firstRun = !search && activeFilterCount === 0 && tabs[3].count === 0;
+  const emptyState = firstRun ? (
+    <Empty title="No opportunities yet">
+      <span className="muted">Click “Create opportunity” to add your first enquiry. Older enquiries may be outside the selected date range.</span>
+      <Button variant="primary" icon={<Plus size={15} />} onClick={() => navigate('/opportunity/create')} style={{ marginTop: 12 }}>
+        Create opportunity
+      </Button>
+    </Empty>
+  ) : (
+    <Empty title="No opportunities found">
+      <span className="muted">Try a different search, date range or filter.</span>
+    </Empty>
+  );
 
   const openQuote = (o: Opportunity) => {
     if (o.quoteId) navigate(`/quote/${o.quoteId}`);
@@ -267,6 +281,7 @@ export default function OpportunityListPage() {
         return (
           <span
             className={`touch-circle ${o.touchpoints ? '' : 'zero'}`}
+            data-tour="opp-touchpoint"
             title="Touchpoints – click to view or log"
             onClick={(e) => {
               e.stopPropagation();
@@ -293,11 +308,11 @@ export default function OpportunityListPage() {
     <div className="opp-page">
       <div className="page-head">
         <div className="page-title">Opportunity</div>
-        <Button variant="primary" icon={<Plus size={15} />} onClick={() => navigate('/opportunity/create')}>
+        <Button variant="primary" icon={<Plus size={15} />} onClick={() => navigate('/opportunity/create')} data-tour="opp-create">
           Create opportunity
         </Button>
       </div>
-      <div className="opp-tabs">
+      <div className="opp-tabs" data-tour="opp-tabs">
         <Tabs tabs={tabs} value={tab} onChange={setTab} className="" />
       </div>
       <div className="list-card" style={{ flex: 1, minHeight: 0 }}>
@@ -322,11 +337,11 @@ export default function OpportunityListPage() {
             currentConfig={() => ({ tab, range, sort, filters, columns, baseView: view.startsWith('custom:') ? 'default' : view })}
           />
           <div className="grow" />
-          <div className="toolbar-search">
+          <div className="toolbar-search" data-tour="opp-search">
             <Search size={14} />
             <input className="input" placeholder="Search by name, phone, code, city" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search opportunities" />
           </div>
-          <Button ref={rangeRef} size="sm" icon={<CalendarDays size={13} />} onClick={() => setRangeOpen((o) => !o)}>
+          <Button ref={rangeRef} size="sm" icon={<CalendarDays size={13} />} data-tour="opp-range" onClick={() => setRangeOpen((o) => !o)}>
             {rangeLabel}
             <ChevronDown size={13} />
           </Button>
@@ -366,6 +381,7 @@ export default function OpportunityListPage() {
           </Popover>
           <button
             className="avatar-btn"
+            data-tour="opp-mine"
             title={view === 'mine' ? 'Showing my opportunities' : 'Show only my opportunities'}
             onClick={() => setView((v) => (v === 'mine' ? 'default' : 'mine'))}
             style={view === 'mine' ? { boxShadow: '0 0 0 2px var(--primary)' } : undefined}
@@ -378,6 +394,7 @@ export default function OpportunityListPage() {
             size="sm"
             variant="ghost"
             icon={<Filter size={13} />}
+            data-tour="opp-filter"
             onClick={() => {
               setDraftFilters(filters);
               setFilterOpen(true);
@@ -387,14 +404,14 @@ export default function OpportunityListPage() {
           </Button>
           <Menu
             trigger={({ ref, onClick }) => (
-              <Button ref={ref} size="sm" variant="ghost" icon={<ArrowDownUp size={13} />} onClick={onClick}>
+              <Button ref={ref} size="sm" variant="ghost" icon={<ArrowDownUp size={13} />} onClick={onClick} data-tour="opp-sort">
                 Sort by
                 <ChevronDown size={13} />
               </Button>
             )}
             items={SORTS.map((s) => ({ label: s.label, icon: s.value === sort ? <Check size={14} /> : <span style={{ width: 14 }} />, onClick: () => setSort(s.value) }))}
           />
-          <div className="seg">
+          <div className="seg" data-tour="opp-layout">
             <button className={layout === 'list' ? 'active' : ''} onClick={() => setLayout('list')} aria-label="List view" title="List view">
               <List size={14} />
             </button>
@@ -415,7 +432,7 @@ export default function OpportunityListPage() {
                     <th key={c.key}>{c.label}</th>
                   ))}
                   <th style={{ width: 40 }}>
-                    <IconButton ref={colsRef} size="sm" tip="Columns" tipPos="left" onClick={() => setColsOpen((o) => !o)}>
+                    <IconButton ref={colsRef} size="sm" tip="Columns" tipPos="left" data-tour="opp-columns" onClick={() => setColsOpen((o) => !o)}>
                       <Columns3 size={14} />
                     </IconButton>
                     <Popover open={colsOpen} onClose={() => setColsOpen(false)} anchor={colsRef} placement="bottom-end">
@@ -439,8 +456,8 @@ export default function OpportunityListPage() {
               </thead>
               <tbody>
                 {data?.rows.map((o) => (
-                  <tr key={o.id} className="clickable" onClick={() => openQuote(o)}>
-                    <td className="kebab-cell" onClick={(e) => e.stopPropagation()}>
+                  <tr key={o.id} className="clickable" onClick={() => openQuote(o)} data-tour="opp-row">
+                    <td className="kebab-cell" onClick={(e) => e.stopPropagation()} data-tour="opp-row-actions">
                       <Menu
                         placement="bottom-start"
                         trigger={({ ref, onClick }) => (
@@ -467,11 +484,7 @@ export default function OpportunityListPage() {
                 ))}
               </tbody>
             </table>
-            {!loading && data && data.rows.length === 0 && (
-              <Empty title="No opportunities found">
-                <span className="muted">Try a different search, date range or filter.</span>
-              </Empty>
-            )}
+            {!loading && data && data.rows.length === 0 && emptyState}
             {loading && (
               <div className="loading-overlay">
                 <Spinner size="lg" />
@@ -508,7 +521,7 @@ export default function OpportunityListPage() {
                 </span>
               </div>
             ))}
-            {!loading && data && data.rows.length === 0 && <Empty title="No opportunities found" />}
+            {!loading && data && data.rows.length === 0 && emptyState}
             {loading && (
               <div className="loading-overlay">
                 <Spinner size="lg" />

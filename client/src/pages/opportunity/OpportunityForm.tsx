@@ -261,7 +261,7 @@ export default function OpportunityFormPage() {
         </div>
         <div className="form-card">
           <div className="form-card-steps">
-            <div className="stepper" style={{ maxWidth: 620 }}>
+            <div className="stepper" style={{ maxWidth: 620 }} data-tour="oppform-steps">
               <div className={`step ${step === 1 ? 'active' : 'done'}`} onClick={() => setStep(1)} style={{ cursor: 'pointer' }}>
                 <span className="step-num">{step === 2 && !stepOneErrors ? <Check size={14} /> : 1}</span>
                 <span>
@@ -281,7 +281,7 @@ export default function OpportunityFormPage() {
 
           {step === 1 ? (
             <>
-              <div className="form-section">
+              <div className="form-section" data-tour="oppform-basic">
                 <h3>Basic details</h3>
                 <div className="form-grid">
                   <Field label="Project name" required error={errors.projectName} className="span-2">
@@ -318,7 +318,7 @@ export default function OpportunityFormPage() {
                   </Field>
                 </div>
               </div>
-              <div className="form-section">
+              <div className="form-section" data-tour="oppform-address">
                 <h3>Site address</h3>
                 <div className="form-grid">
                   <Field label="Address 1">
@@ -362,7 +362,7 @@ export default function OpportunityFormPage() {
                   </Field>
                 </div>
               </div>
-              <div className="form-section">
+              <div className="form-section" data-tour="oppform-map">
                 <h3>Site location</h3>
                 <Field label="Enter site location">
                   <SiteMap lat={form.lat} lng={form.lng} label={form.siteLocation} onChange={(v) => setForm((f) => ({ ...f, lat: v.lat, lng: v.lng, siteLocation: v.label }))} />
@@ -373,7 +373,7 @@ export default function OpportunityFormPage() {
                 <Button variant="ghost" onClick={() => navigate(-1)}>
                   Cancel
                 </Button>
-                <Button variant="primary" onClick={next}>
+                <Button variant="primary" onClick={next} data-tour="oppform-next">
                   Next
                 </Button>
               </div>

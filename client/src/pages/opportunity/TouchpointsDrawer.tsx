@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { MessageSquare, Phone, Trash2, Users, MapPin, Mail } from 'lucide-react';
+import { Edit3, MessageSquare, Phone, Trash2, Users, MapPin, Mail } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import type { Opportunity, Touchpoint } from '../../lib/types';
 import { dateTimeFmt, relativeTime } from '../../lib/format';
@@ -18,7 +18,12 @@ function iconFor(kind: string) {
 }
 
 function nowLocal() {
-  const d = new Date();
+  return toLocalInput(new Date().toISOString());
+}
+
+/** ISO time → value for a datetime-local input. */
+function toLocalInput(iso: string) {
+  const d = new Date(iso);
   d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
   return d.toISOString().slice(0, 16);
 }
@@ -33,6 +38,8 @@ export function TouchpointsDrawer({ opportunity, onClose, onChanged }: { opportu
   const [note, setNote] = useState('');
   const [at, setAt] = useState(nowLocal());
   const [saving, setSaving] = useState(false);
+  /** The touchpoint being edited in the form (null = logging a new one). */
+  const [editing, setEditing] = useState<Touchpoint | null>(null);
 
   const load = useCallback(async () => {
     if (!opportunity) return;
@@ -50,8 +57,22 @@ export function TouchpointsDrawer({ opportunity, onClose, onChanged }: { opportu
     setKind(masters.touchpointTypes[0] || 'Call');
     setNote('');
     setAt(nowLocal());
+    setEditing(null);
     void load();
   }, [opportunity, load, masters.touchpointTypes]);
+
+  const startEdit = (t: Touchpoint) => {
+    setEditing(t);
+    setKind(t.kind);
+    setNote(t.note);
+    setAt(toLocalInput(t.contactedAt));
+  };
+  const cancelEdit = () => {
+    setEditing(null);
+    setKind(masters.touchpointTypes[0] || 'Call');
+    setNote('');
+    setAt(nowLocal());
+  };
 
   const add = async () => {
     if (!opportunity) return;
@@ -61,10 +82,16 @@ export function TouchpointsDrawer({ opportunity, onClose, onChanged }: { opportu
     if (when.getTime() > Date.now() + 60_000) return toast.error('Contacted time cannot be in the future');
     setSaving(true);
     try {
-      await api.post(`/api/opportunities/${opportunity.id}/touchpoints`, { kind, note: note.trim(), contactedAt: when.toISOString() });
-      toast.success('Touchpoint logged');
-      setNote('');
-      setAt(nowLocal());
+      if (editing) {
+        await api.put(`/api/touchpoints/${editing.id}`, { kind, note: note.trim(), contactedAt: when.toISOString() });
+        toast.success('Touchpoint updated');
+        cancelEdit();
+      } else {
+        await api.post(`/api/opportunities/${opportunity.id}/touchpoints`, { kind, note: note.trim(), contactedAt: when.toISOString() });
+        toast.success('Touchpoint logged');
+        setNote('');
+        setAt(nowLocal());
+      }
       await load();
       onChanged();
     } catch (e) {
@@ -78,6 +105,8 @@ export function TouchpointsDrawer({ opportunity, onClose, onChanged }: { opportu
     if (!(await confirm({ title: 'Delete touchpoint', message: `Delete this ${t.kind.toLowerCase()} from ${dateTimeFmt(t.contactedAt)}?`, confirmText: 'Delete', danger: true }))) return;
     try {
       await api.del(`/api/touchpoints/${t.id}`);
+      if (editing?.id === t.id) cancelEdit();
+      toast.success('Touchpoint deleted');
       await load();
       onChanged();
     } catch (e) {
@@ -92,12 +121,12 @@ export function TouchpointsDrawer({ opportunity, onClose, onChanged }: { opportu
           <div className="muted fs-12">
             {opportunity.contactName} · {opportunity.phoneCode} {opportunity.phone}
           </div>
-          <div className="card card-pad col gap-12">
-            <div className="fw-600">Log a touchpoint</div>
+          <div className={`card card-pad col gap-12 ${editing ? 'touch-editing' : ''}`} data-tour="touchpoint-form">
+            <div className="fw-600">{editing ? `Edit touchpoint · ${editing.kind}` : 'Log a touchpoint'}</div>
             <div className="row gap-12">
               <Field label="Type" className="grow">
                 <Select value={kind} onChange={(e) => setKind(e.target.value)}>
-                  {masters.touchpointTypes.map((t) => (
+                  {(masters.touchpointTypes.includes(kind) || !kind ? masters.touchpointTypes : [kind, ...masters.touchpointTypes]).map((t) => (
                     <option key={t}>{t}</option>
                   ))}
                 </Select>
@@ -110,8 +139,13 @@ export function TouchpointsDrawer({ opportunity, onClose, onChanged }: { opportu
               <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={1000} placeholder="What was discussed?" />
             </Field>
             <div className="row" style={{ justifyContent: 'flex-end' }}>
-              <Button variant="primary" loading={saving} onClick={add}>
-                Log touchpoint
+              {editing && (
+                <Button onClick={cancelEdit} disabled={saving}>
+                  Cancel
+                </Button>
+              )}
+              <Button variant="primary" loading={saving} onClick={add} data-tour={editing ? 'touchpoint-save' : undefined}>
+                {editing ? 'Save changes' : 'Log touchpoint'}
               </Button>
             </div>
           </div>
@@ -120,11 +154,13 @@ export function TouchpointsDrawer({ opportunity, onClose, onChanged }: { opportu
               <Spinner />
             </div>
           ) : list.length === 0 ? (
-            <Empty title="No touchpoints yet" />
+            <Empty title="No touchpoints yet">
+              <span className="muted">Log calls, site visits and meetings above to keep a history with this customer.</span>
+            </Empty>
           ) : (
             <div className="touch-timeline">
               {list.map((t) => (
-                <div key={t.id} className="touch-item">
+                <div key={t.id} className={`touch-item ${editing?.id === t.id ? 'editing' : ''}`}>
                   <span className="touch-icon">{iconFor(t.kind)}</span>
                   <div className="grow">
                     <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -139,6 +175,9 @@ export function TouchpointsDrawer({ opportunity, onClose, onChanged }: { opportu
                       {t.user ? ` · ${t.user}` : ''}
                     </div>
                   </div>
+                  <IconButton size="sm" tip="Edit" tipPos="left" onClick={() => startEdit(t)} data-tour="touchpoint-edit">
+                    <Edit3 size={13} />
+                  </IconButton>
                   <IconButton size="sm" tip="Delete" tipPos="left" onClick={() => void remove(t)}>
                     <Trash2 size={13} />
                   </IconButton>

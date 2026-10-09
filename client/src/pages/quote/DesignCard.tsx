@@ -26,7 +26,7 @@ function menuItems(d: Design, a: DesignActions) {
 
 export function DesignCard({ design: d, selected, onToggle, actions }: { design: Design; selected: boolean; onToggle: (v: boolean) => void; actions: DesignActions }) {
   return (
-    <div className={`design-card ${selected ? 'selected' : ''}`}>
+    <div className={`design-card ${selected ? 'selected' : ''}`} data-tour="design-card">
       <div className="design-card-top">
         <Checkbox checked={selected} onChange={onToggle} title="Select design" />
         <span className="design-ref">{d.ref}</span>
@@ -38,7 +38,7 @@ export function DesignCard({ design: d, selected, onToggle, actions }: { design:
         )}
         <Menu
           trigger={({ ref, onClick }) => (
-            <IconButton ref={ref} size="sm" onClick={onClick} aria-label="Design actions">
+            <IconButton ref={ref} size="sm" onClick={onClick} aria-label="Design actions" data-tour="design-card-menu">
               <MoreVertical size={15} />
             </IconButton>
           )}
@@ -76,7 +76,7 @@ export function DesignCard({ design: d, selected, onToggle, actions }: { design:
         </div>
       </div>
       <div className="design-card-foot">
-        <button className="btn-link btn btn-sm" onClick={() => actions.onView(d)}>
+        <button className="btn-link btn btn-sm" onClick={() => actions.onView(d)} data-tour="design-details">
           <Eye size={13} /> View details
         </button>
         <button className="btn-link btn btn-sm" onClick={() => actions.onEdit(d)}>
@@ -115,7 +115,7 @@ export function DesignRow({ design: d, selected, onToggle, actions }: { design: 
       <td className="kebab-cell">
         <Menu
           trigger={({ ref, onClick }) => (
-            <IconButton ref={ref} size="sm" onClick={onClick} aria-label="Design actions">
+            <IconButton ref={ref} size="sm" onClick={onClick} aria-label="Design actions" data-tour="design-card-menu">
               <MoreVertical size={15} />
             </IconButton>
           )}

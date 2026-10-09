@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, FileImage, FileSpreadsheet, FileText, File as FileIcon, Trash2, UploadCloud } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { Download, Edit3, FileImage, FileSpreadsheet, FileText, File as FileIcon, Trash2, UploadCloud } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { dateTimeFmt, fileSize } from '../../lib/format';
 import { useMasters } from '../../context/MastersContext';
 import { useConfirm, useToast } from '../../components/feedback';
-import { Badge, Button, Empty, IconButton, Select, Spinner } from '../../components/ui';
+import { Badge, Button, Empty, Field, IconButton, Input, Select, Spinner } from '../../components/ui';
+import { Modal } from '../../components/overlay';
 
 interface Doc {
   id: number;
@@ -23,6 +24,67 @@ function iconFor(mime: string | null, name: string) {
   return <FileIcon size={18} color="#6b7280" />;
 }
 
+/** Rename a document (the file extension is kept) and change its category. */
+function EditDocumentDialog({ doc, categories, onClose, onSaved }: { doc: Doc; categories: string[]; onClose: () => void; onSaved: () => Promise<void> }) {
+  const toast = useToast();
+  const ext = /\.[A-Za-z0-9]{1,8}$/.exec(doc.name)?.[0] || '';
+  const [name, setName] = useState(ext ? doc.name.slice(0, -ext.length) : doc.name);
+  const [category, setCategory] = useState(doc.category);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const options = categories.includes(doc.category) ? categories : [doc.category, ...categories];
+
+  async function submit(ev?: FormEvent) {
+    ev?.preventDefault();
+    const n = name.trim();
+    if (!n) return setError('Document name is required');
+    if (/[\\/:*?"<>|]/.test(n)) return setError('The name cannot contain \\ / : * ? " < > |');
+    setError(null);
+    setSaving(true);
+    try {
+      await api.put(`/api/documents/${doc.id}`, { name: n + ext, category });
+      await onSaved();
+      toast.success('Document updated');
+      onClose();
+    } catch (e) {
+      toast.error(errorMessage(e));
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Edit document"
+      size="sm"
+      footer={
+        <>
+          <Button onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button variant="primary" type="submit" form="doc-edit-form" loading={saving}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <form id="doc-edit-form" className="col gap-12" onSubmit={(e) => void submit(e)} noValidate>
+        <Field label="Name" required error={error} hint={ext ? `The ${ext} extension is kept` : undefined} htmlFor="doc-name">
+          <Input id="doc-name" value={name} maxLength={190} autoFocus invalid={!!error} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label="Category" required htmlFor="doc-cat">
+          <Select id="doc-cat" value={category} onChange={(e) => setCategory(e.target.value)}>
+            {options.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </Select>
+        </Field>
+      </form>
+    </Modal>
+  );
+}
+
 export function DocumentsTab({ quoteId }: { quoteId: number }) {
   const { masters } = useMasters();
   const toast = useToast();
@@ -32,6 +94,7 @@ export function DocumentsTab({ quoteId }: { quoteId: number }) {
   const [uploading, setUploading] = useState(false);
   const [drag, setDrag] = useState(false);
   const [filter, setFilter] = useState('');
+  const [editing, setEditing] = useState<Doc | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(async () => {
@@ -109,6 +172,7 @@ export function DocumentsTab({ quoteId }: { quoteId: number }) {
     <div className="quote-pane">
       <div
         className={`doc-drop ${drag ? 'drag' : ''}`}
+        data-tour="docs-upload"
         onDragOver={(e) => {
           e.preventDefault();
           setDrag(true);
@@ -153,7 +217,9 @@ export function DocumentsTab({ quoteId }: { quoteId: number }) {
             <Spinner />
           </div>
         ) : shown.length === 0 ? (
-          <Empty title="No documents uploaded" />
+          <Empty title={filter && docs.length ? `No ${filter} documents` : 'No documents uploaded'}>
+            <span className="muted">{filter && docs.length ? 'Choose another category or upload a file.' : 'Drop files above or click Browse files to add site photos, drawings and purchase orders.'}</span>
+          </Empty>
         ) : (
           <div className="table-wrap">
             <table className="table">
@@ -164,7 +230,7 @@ export function DocumentsTab({ quoteId }: { quoteId: number }) {
                   <th className="num">Size</th>
                   <th>Uploaded by</th>
                   <th>Uploaded on</th>
-                  <th style={{ width: 90 }} />
+                  <th style={{ width: 120 }} />
                 </tr>
               </thead>
               <tbody>
@@ -189,6 +255,9 @@ export function DocumentsTab({ quoteId }: { quoteId: number }) {
                         <IconButton size="sm" tip="Download" onClick={() => void download(d)}>
                           <Download size={14} />
                         </IconButton>
+                        <IconButton size="sm" tip="Rename / change category" onClick={() => setEditing(d)} data-tour="document-edit">
+                          <Edit3 size={14} />
+                        </IconButton>
                         <IconButton size="sm" tip="Delete" onClick={() => void remove(d)}>
                           <Trash2 size={14} />
                         </IconButton>
@@ -201,6 +270,7 @@ export function DocumentsTab({ quoteId }: { quoteId: number }) {
           </div>
         )}
       </div>
+      {editing && <EditDocumentDialog doc={editing} categories={masters.documentCategories} onClose={() => setEditing(null)} onSaved={load} />}
     </div>
   );
 }

@@ -55,7 +55,7 @@ export function glassSummaryLines(data: ReportData): BomLine[] {
 }
 
 function summaryCells(l: BomLine): string[] {
-  return [l.name, l.code, f3(l.qty), fixed2(l.rate), fixed2(l.amount)];
+  return [l.added ? `${l.name} (added)` : l.name, l.code || '—', f3(l.qty), fixed2(l.rate), fixed2(l.amount)];
 }
 
 function addPaneTable(b: ReturnType<typeof internalBuilder>, title: string, rows: PaneRow[], emptyText: string): void {
@@ -147,8 +147,8 @@ export function buildGlassBoqPages(data: ReportData): ReactNode[][] {
             </td>
           </tr>
         )}
-        {chunk.map((l) => (
-          <tr key={l.code}>
+        {chunk.map((l, i) => (
+          <tr key={`${l.code}-${l.id ?? ''}-${i}`}>
             {summaryCells(l).map((c, j) => (
               <td key={j} className={alignCls(GLASS_SUM_COLS[j].align)}>
                 {c}

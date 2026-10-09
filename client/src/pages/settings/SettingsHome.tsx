@@ -45,11 +45,12 @@ export function SettingsHome({
   const sectionCards = active.key === 'favourites' ? favCards : VISIBLE_CARDS.filter((c) => c.section === active.key);
 
   const grid = (cards: CardDef[]) => (
-    <div className="adm-st-cards">
+    <div className="adm-st-cards" data-tour="settings-cards">
       {cards.map((c) => (
         <div
           key={c.key}
           className="adm-st-card"
+          data-tour="settings-card"
           role="link"
           tabIndex={0}
           onClick={() => onOpen(c.key)}
@@ -70,12 +71,12 @@ export function SettingsHome({
 
   return (
     <div className="page adm-st-page">
-      <div className="page-head">
+      <div className="page-head" data-tour="settings-head">
         <h1 className="page-title">Settings</h1>
         <SearchBox value={search} onChange={setSearch} placeholder="Search" width={260} />
       </div>
       <div className="adm-st">
-        <nav className="adm-st-nav" aria-label="Settings categories">
+        <nav className="adm-st-nav" aria-label="Settings categories" data-tour="settings-nav">
           {navSections.map((s) => {
             const Icon = s.icon;
             const isActive = !q && s.key === active.key;

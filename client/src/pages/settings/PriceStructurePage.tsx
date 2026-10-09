@@ -253,6 +253,30 @@ export function PriceStructurePage() {
     }
   }
 
+  async function removeStructure() {
+    if (!selected) return;
+    const ok = await confirm({
+      title: 'Delete price structure?',
+      message: (
+        <>
+          <b>{selected.name}</b> will be deleted. Quotes that use it keep their own copy of the cost heads.
+          {dirty && <div className="mt-8">Your unsaved changes to it are discarded.</div>}
+        </>
+      ),
+      confirmText: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.del(`/api/price-structures/${selected.id}`);
+      await load();
+      await refresh();
+      toast.success(`${selected.name} deleted`);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  }
+
   const editingHead = headModal?.mode === 'edit' ? heads.find((h) => h.key === headModal.key) : undefined;
   const insertAt = heads.length ? heads.length - 1 : 0; // new heads go above the Grand Total (last head)
   const modalIndex = editingHead ? heads.indexOf(editingHead) : insertAt;
@@ -293,7 +317,7 @@ export function PriceStructurePage() {
       }
     >
       {!canEdit && <ReadOnlyNote />}
-      <div className="adm-ps">
+      <div className="adm-ps" data-tour="settings-ps-heads">
         <aside className="card adm-pl-levels" aria-label="Price structures">
           <div className="adm-pl-levels-head">
             Price structures
@@ -352,6 +376,11 @@ export function PriceStructurePage() {
                 {canEdit && selected && (
                   <IconButton size="sm" tip="Rename" onClick={() => setRenaming(name)}>
                     <Pencil size={14} />
+                  </IconButton>
+                )}
+                {canEdit && selected && !selected.is_default && (list?.length ?? 0) > 1 && (
+                  <IconButton size="sm" tip="Delete price structure" onClick={() => void removeStructure()} data-tour="settings-ps-delete">
+                    <Trash2 size={14} />
                   </IconButton>
                 )}
                 {nameError && selected && <span className="field-error">{nameError}</span>}

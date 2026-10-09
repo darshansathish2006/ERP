@@ -354,9 +354,55 @@ router.post('/opportunities/:id/touchpoints', (req, res) => {
   run('UPDATE opportunities SET updated_at = ? WHERE id = ?', new Date().toISOString(), opp.id);
   res.status(201).json({ id: Number(info.lastInsertRowid) });
 });
+router.put('/touchpoints/:id', (req, res) => {
+  const t = get('SELECT * FROM touchpoints WHERE id = ?', intParam(req.params.id, 0));
+  if (!t) throw notFound('Touchpoint');
+  const kind = str(req.body?.kind, 40);
+  if (!kind) throw badRequest('Touchpoint type is required');
+  const at = req.body?.contactedAt ? new Date(req.body.contactedAt) : new Date(t.contacted_at);
+  if (Number.isNaN(at.getTime())) throw badRequest('Invalid date');
+  if (at.getTime() > Date.now() + 60_000) throw badRequest('Contacted time cannot be in the future');
+  run('UPDATE touchpoints SET kind = ?, note = ?, contacted_at = ? WHERE id = ?', kind, str(req.body?.note, 1000), at.toISOString(), t.id);
+  run('UPDATE opportunities SET updated_at = ? WHERE id = ?', new Date().toISOString(), t.opportunity_id);
+  res.json({ ok: true });
+});
 router.delete('/touchpoints/:id', (req, res) => {
   run('DELETE FROM touchpoints WHERE id = ?', intParam(req.params.id, 0));
   res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------- teams
+// A team is the "team" field shared by its users: adding a team assigns it to the chosen users.
+function readTeam(body) {
+  const name = str(body?.name, 80);
+  if (!name) throw badRequest('Team name is required');
+  const ids = (Array.isArray(body?.members) ? body.members : []).map((x) => intParam(x, 0)).filter(Boolean);
+  if (!ids.length) throw badRequest('Choose at least one member for the team');
+  for (const id of ids) if (!get('SELECT id FROM users WHERE id = ?', id)) throw notFound('User');
+  return { name, ids };
+}
+router.post('/teams', requirePermission('settings.manage'), (req, res) => {
+  const { name, ids } = readTeam(req.body);
+  if (get('SELECT id FROM users WHERE team = ? COLLATE NOCASE LIMIT 1', name)) throw badRequest(`Team ${name} already exists`);
+  tx(() => ids.forEach((id) => run('UPDATE users SET team = ? WHERE id = ?', name, id)));
+  res.status(201).json({ ok: true, name, members: ids.length });
+});
+router.put('/teams/:name', requirePermission('settings.manage'), (req, res) => {
+  const old = String(req.params.name);
+  if (!get('SELECT id FROM users WHERE team = ? LIMIT 1', old)) throw notFound('Team');
+  const { name, ids } = readTeam(req.body);
+  if (name.toLowerCase() !== old.toLowerCase() && get('SELECT id FROM users WHERE team = ? COLLATE NOCASE LIMIT 1', name)) throw badRequest(`Team ${name} already exists`);
+  tx(() => {
+    run('UPDATE users SET team = NULL WHERE team = ?', old);
+    ids.forEach((id) => run('UPDATE users SET team = ? WHERE id = ?', name, id));
+  });
+  res.json({ ok: true, name, members: ids.length });
+});
+router.delete('/teams/:name', requirePermission('settings.manage'), (req, res) => {
+  const old = String(req.params.name);
+  const n = Number(run('UPDATE users SET team = NULL WHERE team = ?', old).changes);
+  if (!n) throw notFound('Team');
+  res.json({ ok: true, members: n });
 });
 
 // ---------------------------------------------------------------- import data

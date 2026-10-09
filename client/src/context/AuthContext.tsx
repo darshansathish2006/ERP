@@ -2,6 +2,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { api, getToken, onUnauthorized, setToken } from '../lib/api';
 import type { User } from '../lib/types';
 
+/** Body of PUT /api/auth/me/tour: chapters to mark done, or finish / skip / reset the guided tour. */
+export interface TourUpdate {
+  done?: string[];
+  finished?: true;
+  skipped?: true;
+  reset?: true;
+}
+
 interface AuthState {
   user: User | null;
   loading: boolean;
@@ -9,6 +17,8 @@ interface AuthState {
   register: (data: { name: string; email: string; password: string; phone?: string }) => Promise<void>;
   logout: () => Promise<void>;
   setUser: (u: User) => void;
+  /** Saves guided-tour progress and refreshes `user.tour`. */
+  saveTour: (update: TourUpdate) => Promise<void>;
 }
 
 const AuthCtx = createContext<AuthState | null>(null);
@@ -55,7 +65,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
-  const value = useMemo(() => ({ user, loading, login, register, logout, setUser }), [user, loading, login, register, logout]);
+  const saveTour = useCallback(async (update: TourUpdate) => {
+    const r = await api.put<{ user: User }>('/api/auth/me/tour', update);
+    // Ignore the answer if the user logged out meanwhile.
+    setUser((cur) => (cur && r.user && cur.id === r.user.id ? r.user : cur));
+  }, []);
+
+  const value = useMemo(() => ({ user, loading, login, register, logout, setUser, saveTour }), [user, loading, login, register, logout, saveTour]);
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
 

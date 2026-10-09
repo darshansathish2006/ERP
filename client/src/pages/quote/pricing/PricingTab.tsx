@@ -22,13 +22,14 @@ import type { CostHead, FullQuote, QuoteSummary } from '../../../lib/types';
 import { fixed2, inr } from '../../../lib/format';
 import { useMasters } from '../../../context/MastersContext';
 import { useConfirm, useToast } from '../../../components/feedback';
-import { Button, Field, IconButton, Input, PageLoading, Select, Switch, Textarea } from '../../../components/ui';
+import { Badge, Button, Field, IconButton, Input, PageLoading, Select, Switch, Textarea } from '../../../components/ui';
 import { Menu, Modal } from '../../../components/overlay';
 import { useAuth } from '../../../context/AuthContext';
 import { CostHeadDialog } from './CostHeadDialog';
 import { RatePage, type RateCategory } from './RatePage';
 import { ManualRatePage } from './ManualRatePage';
 import { AddonPage } from './AddonPage';
+import { ChargeDialog, VehiclePicker } from './ChargeDialog';
 
 export interface PricingDesign {
   id: number;
@@ -53,6 +54,9 @@ export interface PricingData {
   heads: CostHead[];
   summary: QuoteSummary;
   designs: PricingDesign[];
+  /** Subtotal heads a charge can be added into, and the default one. */
+  chargeTargets?: string[];
+  defaultChargeTarget?: string | null;
 }
 
 type View = 'structure' | RateCategory | 'addons' | 'manual';
@@ -77,6 +81,7 @@ export function PricingTab({ quoteId, summary, reloadQuote }: { quoteId: number;
   const [updating, setUpdating] = useState(false);
   const [editing, setEditing] = useState<{ index: number; head: CostHead; isNew: boolean } | null>(null);
   const [modify, setModify] = useState<{ index: number; head: CostHead } | null>(null);
+  const [charge, setCharge] = useState<{ head: CostHead | null } | null>(null);
   const { user } = useAuth();
   const canManual = !!user?.permissions?.['quote.manualRate'];
 
@@ -113,14 +118,15 @@ export function PricingTab({ quoteId, summary, reloadQuote }: { quoteId: number;
     if (!data || id === data.priceStructureId) return;
     const ok = await confirm({
       title: 'Change price structure',
-      message: `Switch this quote to "${name}"? The cost heads of this quote will be replaced with the ones from ${name}.`,
+      message: `Switch this quote to "${name}"? The cost heads of this quote will be replaced with the ones from ${name}. Charges you added to this quote are kept.`,
       confirmText: 'Switch',
     });
     if (!ok) return;
     try {
-      await api.post(`/api/quotes/${quoteId}/price-structure`, { priceStructureId: id });
+      const r = await api.post<{ keptCharges?: string[]; droppedCharges?: string[] }>(`/api/quotes/${quoteId}/price-structure`, { priceStructureId: id });
       await afterChange();
-      toast.success(`Price structure changed to ${name}`);
+      toast.success(`Price structure changed to ${name}${r.keptCharges?.length ? ` · ${r.keptCharges.length} added charge${r.keptCharges.length > 1 ? 's' : ''} kept` : ''}`);
+      if (r.droppedCharges?.length) toast.warning(`Could not carry over: ${r.droppedCharges.join(', ')}. Add ${r.droppedCharges.length > 1 ? 'them' : 'it'} again if needed.`, 6000);
     } catch (e) {
       toast.error(errorMessage(e));
     }
@@ -147,6 +153,28 @@ export function PricingTab({ quoteId, summary, reloadQuote }: { quoteId: number;
     void saveHeads(heads, 'Cost head order updated');
   };
 
+  const deleteCharge = async (h: CostHead) => {
+    const value = data?.summary.heads.find((x) => x.name === h.name)?.value ?? 0;
+    const ok = await confirm({
+      title: 'Delete added charge',
+      message: (
+        <>
+          Remove <b>{h.name}</b> ({inr(value)}) from this quote? It is also taken out of {h.addedTo || 'the total'}.
+        </>
+      ),
+      confirmText: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.del(`/api/quotes/${quoteId}/charges/${encodeURIComponent(h.name)}`);
+      await afterChange();
+      toast.success(`${h.name} deleted`);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  };
+
   const deleteHead = async (i: number) => {
     if (!data) return;
     const h = data.heads[i];
@@ -160,12 +188,12 @@ export function PricingTab({ quoteId, summary, reloadQuote }: { quoteId: number;
   if (!data) return <PageLoading />;
 
   const nav = (
-    <aside className="pricing-nav">
-      <button className={`pricing-nav-item ${view === 'structure' ? 'active' : ''}`} onClick={() => setView('structure')}>
+    <aside className="pricing-nav" data-tour="pricing-nav">
+      <button className={`pricing-nav-item ${view === 'structure' ? 'active' : ''}`} onClick={() => setView('structure')} data-tour="pricing-nav-structure">
         <PanelRightOpen size={15} /> Project Price Structure
       </button>
       {MENU.map((m) => (
-        <button key={m.view} className={`pricing-nav-item ${view === m.view ? 'active' : ''}`} onClick={() => setView(m.view)}>
+        <button key={m.view} className={`pricing-nav-item ${view === m.view ? 'active' : ''}`} onClick={() => setView(m.view)} data-tour={`pricing-nav-${m.view}`}>
           {m.icon}
           {m.label}
         </button>
@@ -213,7 +241,7 @@ export function PricingTab({ quoteId, summary, reloadQuote }: { quoteId: number;
             <Menu
               placement="bottom-start"
               trigger={({ ref, onClick }) => (
-                <Button ref={ref} size="sm" variant="dark" onClick={onClick} disabled={!canManual}>
+                <Button ref={ref} size="sm" variant="dark" onClick={onClick} disabled={!canManual} data-tour="pricing-structure">
                   {data.priceStructureName}
                   <ChevronDown size={13} />
                 </Button>
@@ -221,21 +249,14 @@ export function PricingTab({ quoteId, summary, reloadQuote }: { quoteId: number;
               items={masters.priceStructures.map((p) => ({ label: p.name + (p.id === data.priceStructureId ? '  ✓' : ''), onClick: () => void switchStructure(p.id, p.name) }))}
             />
             <div className="grow" />
-            {canManual && (
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={<Plus size={13} />}
-                onClick={() => setEditing({ index: data.heads.length - 1, isNew: true, head: { sl: data.heads.length, name: '', calcType: 'LumpSumDivideByArea', formula: '#LUMPSUM', rate: 0, visibility: 'summary' } })}
-              >
-                Add cost head
-              </Button>
-            )}
-            <Button size="sm" variant="outline-primary" icon={<RefreshCw size={13} />} loading={updating} onClick={updatePricing}>
+            <Button size="sm" variant="primary" icon={<Plus size={13} />} onClick={() => setCharge({ head: null })} data-tour="costhead-add">
+              Add cost head
+            </Button>
+            <Button size="sm" variant="outline-primary" icon={<RefreshCw size={13} />} loading={updating} onClick={updatePricing} data-tour="pricing-update">
               Update Pricing
             </Button>
           </div>
-          <div className="table-wrap" style={{ flex: 1 }}>
+          <div className="table-wrap" style={{ flex: 1 }} data-tour="pricing-table">
             <table className="table cost-table">
               <thead>
                 <tr>
@@ -261,9 +282,23 @@ export function PricingTab({ quoteId, summary, reloadQuote }: { quoteId: number;
                 {data.heads.map((h, i) => {
                   const value = data.summary.heads.find((x) => x.name === h.name)?.value ?? 0;
                   return (
-                    <tr key={h.name} className={isSubtotal(h) ? 'highlight' : ''}>
-                      <td className="kebab-cell">
-                        {canManual && (
+                    <tr key={h.name} className={h.added ? 'added-head-row' : isSubtotal(h) ? 'highlight' : ''}>
+                      <td className="kebab-cell" data-tour="pricing-head-actions">
+                        {h.added ? (
+                          <Menu
+                            placement="bottom-start"
+                            trigger={({ ref, onClick }) => (
+                              <IconButton ref={ref} size="sm" onClick={onClick} aria-label="Charge actions" data-tour="costhead-actions">
+                                <MoreVertical size={15} />
+                              </IconButton>
+                            )}
+                            items={[
+                              { label: `Edit ${h.name}`, icon: <Edit3 size={15} />, onClick: () => setCharge({ head: h }), dataTour: 'costhead-edit' },
+                              { separator: true },
+                              { label: 'Delete', icon: <Trash2 size={15} />, danger: true, onClick: () => void deleteCharge(h) },
+                            ]}
+                          />
+                        ) : canManual && (
                           <Menu
                             placement="bottom-start"
                             trigger={({ ref, onClick }) => (
@@ -287,6 +322,7 @@ export function PricingTab({ quoteId, summary, reloadQuote }: { quoteId: number;
                         <span className="row gap-8">
                           <span className="cost-icon">₹</span>
                           {h.name}
+                          {h.added && <Badge tone="primary">Added</Badge>}
                         </span>
                         {h.remark && <div className="muted fs-11">{h.remark}</div>}
                       </td>
@@ -304,9 +340,9 @@ export function PricingTab({ quoteId, summary, reloadQuote }: { quoteId: number;
           </div>
         </div>
       </div>
-      <aside className="price-summary-card">
+      <aside className="price-summary-card" data-tour="pricing-summary">
         <div className="price-summary-title">Price Summary</div>
-        {data.designs.length === 0 ? (
+        {data.designs.length === 0 && !data.summary.addedItems?.count && !data.summary.grand ? (
           <div className="price-summary-empty">No data found</div>
         ) : (
           <>
@@ -347,6 +383,26 @@ export function PricingTab({ quoteId, summary, reloadQuote }: { quoteId: number;
             const ok = await saveHeads(heads, editing.isNew ? 'Cost head added' : 'Cost head updated');
             if (ok) setEditing(null);
           }}
+        />
+      )}
+      {charge && (
+        <ChargeDialog
+          quoteId={quoteId}
+          heads={data.heads}
+          summary={data.summary}
+          targets={data.chargeTargets ?? []}
+          defaultTarget={data.defaultChargeTarget ?? null}
+          charge={charge.head}
+          onClose={() => setCharge(null)}
+          onSaved={afterChange}
+          onAdvanced={
+            canManual
+              ? () => {
+                  setCharge(null);
+                  setEditing({ index: data.heads.length - 1, isNew: true, head: { sl: data.heads.length, name: '', calcType: 'LumpSumDivideByArea', formula: '#LUMPSUM', rate: 0, visibility: 'summary' } });
+                }
+              : undefined
+          }
         />
       )}
       {modify && (
@@ -416,6 +472,14 @@ function ModifyHeadDialog({ head, onClose, onSave }: { head: CostHead; onClose: 
         <Field label="Rate" required error={valid ? null : 'Enter a number'}>
           <Input type="number" step="any" value={rate} onChange={(e) => setRate(e.target.value)} autoFocus />
         </Field>
+        {/transport/i.test(head.name) && head.calcType.startsWith('LumpSum') && (
+          <VehiclePicker
+            onUse={(amount, label) => {
+              setRate(String(amount));
+              if (!remark.trim()) setRemark(label);
+            }}
+          />
+        )}
         <Field label="Show in quote report">
           <Select value={visibility} onChange={(e) => setVisibility(e.target.value as CostHead['visibility'])}>
             <option value="summary">Show in Quote Summary</option>

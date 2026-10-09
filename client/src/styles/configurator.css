@@ -355,7 +355,8 @@
   height: 42px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  /* soft backdrop so the white uPVC profiles of the preview read clearly */
+  background: #eef2f5;
   cursor: pointer;
   padding: 3px;
   transition: border-color 0.12s, background 0.12s;

@@ -142,7 +142,7 @@ export function DesignTab({ data, reload, onOpenConfigurator }: Props) {
         <div className="grow" />
         <Menu
           trigger={({ ref, onClick }) => (
-            <Button ref={ref} size="sm" icon={<Paintbrush size={13} />} onClick={onClick} disabled={!data.designs.length}>
+            <Button ref={ref} size="sm" icon={<Paintbrush size={13} />} onClick={onClick} disabled={!data.designs.length} data-tour="design-global">
               Global edits
               <ChevronDown size={13} />
             </Button>
@@ -155,7 +155,7 @@ export function DesignTab({ data, reload, onOpenConfigurator }: Props) {
             { label: 'Change location', onClick: () => setGlobalField('location') },
           ]}
         />
-        <Button size="sm" icon={<Settings2 size={13} />} onClick={() => setDefaultsOpen(true)}>
+        <Button size="sm" icon={<Settings2 size={13} />} onClick={() => setDefaultsOpen(true)} data-tour="design-defaults">
           Project defaults
         </Button>
       </div>
@@ -165,14 +165,14 @@ export function DesignTab({ data, reload, onOpenConfigurator }: Props) {
           <div className="design-empty-block">
             <h3>Select a design from templates</h3>
             <p className="muted fs-12">Select from a list of wide variety of predefined designs</p>
-            <Button variant="primary" size="sm" onClick={() => setLibOpen(true)}>
+            <Button variant="primary" size="sm" onClick={() => setLibOpen(true)} data-tour="design-library">
               Choose from library designs
             </Button>
           </div>
           <div className="design-empty-block shaded">
             <h3>Create new design</h3>
             <p className="muted fs-12">Create a new Design new typologies depending on customer preference for systems, colors and other technical specifications</p>
-            <Button variant="primary" size="sm" onClick={() => onOpenConfigurator('new')}>
+            <Button variant="primary" size="sm" onClick={() => onOpenConfigurator('new')} data-tour="design-create">
               Create design
             </Button>
           </div>
@@ -180,10 +180,10 @@ export function DesignTab({ data, reload, onOpenConfigurator }: Props) {
       ) : (
         <div className="list-card" style={{ flex: 1, minHeight: 0 }}>
           <div className="toolbar">
-            <Button variant="primary" size="sm" onClick={() => onOpenConfigurator('new')}>
+            <Button variant="primary" size="sm" onClick={() => onOpenConfigurator('new')} data-tour="design-create">
               Create design
             </Button>
-            <Button variant="dark" size="sm" onClick={() => setLibOpen(true)}>
+            <Button variant="dark" size="sm" onClick={() => setLibOpen(true)} data-tour="design-library">
               Choose from library designs
             </Button>
             {selected.length > 0 && (
@@ -205,13 +205,13 @@ export function DesignTab({ data, reload, onOpenConfigurator }: Props) {
               <Search size={14} />
               <input className="input" placeholder="Search designs" value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
-            <Button size="sm" variant="dark" icon={<RefreshCw size={13} />} loading={refreshing} onClick={refresh}>
+            <Button size="sm" variant="dark" icon={<RefreshCw size={13} />} loading={refreshing} onClick={refresh} data-tour="design-refresh">
               Refresh designs
             </Button>
-            <Button size="sm" variant="ghost" icon={<ListOrdered size={13} />} onClick={() => setOrderOpen(true)}>
+            <Button size="sm" variant="ghost" icon={<ListOrdered size={13} />} onClick={() => setOrderOpen(true)} data-tour="design-order">
               Design orders
             </Button>
-            <Button ref={filterRef} size="sm" variant="ghost" icon={<Filter size={13} />} onClick={() => setFilterOpen((o) => !o)}>
+            <Button ref={filterRef} size="sm" variant="ghost" icon={<Filter size={13} />} data-tour="design-filter" onClick={() => setFilterOpen((o) => !o)}>
               Filter{filterCount ? ` (${filterCount})` : ''}
             </Button>
             <Popover open={filterOpen} onClose={() => setFilterOpen(false)} anchor={filterRef} placement="bottom-end">
@@ -244,7 +244,7 @@ export function DesignTab({ data, reload, onOpenConfigurator }: Props) {
                 </Button>
               </div>
             </Popover>
-            <div className="seg">
+            <div className="seg" data-tour="design-layout">
               <button className={layoutMode === 'list' ? 'active' : ''} onClick={() => setLayoutMode('list')} aria-label="List view" title="List view">
                 <List size={14} />
               </button>
@@ -358,6 +358,7 @@ export function DesignTab({ data, reload, onOpenConfigurator }: Props) {
       </Drawer>
       <DesignDetailsDrawer
         designId={detailsId}
+        onChanged={() => void reload()}
         onClose={() => setDetailsId(null)}
         onEdit={(id) => {
           setDetailsId(null);

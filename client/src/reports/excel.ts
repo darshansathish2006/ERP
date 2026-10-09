@@ -4,7 +4,7 @@ import { round2 } from '../lib/format';
 import { reportFileName, getReportDef, type ReportKey } from './registry';
 import { addressLines, customerName, orderedGroups, sumBy } from './templates/common';
 import { technicals } from './templates/typology';
-import { barColour, profileBars } from './templates/profileBoq';
+import { addedProfileLines, barColour, profileBars } from './templates/profileBoq';
 import { INSTALLATION_GROUP, accRows, hardwareLines, installationLines, reinforcementLines } from './templates/accessoriesBoq';
 import { glassPaneRows, glassSummaryLines } from './templates/glassBoq';
 import { barCutsText, cutGroups } from './templates/cuttingSchedule';
@@ -95,6 +95,11 @@ function profileBoq(wb: XLSX.WorkBook, data: ReportData, title: string) {
   rows.push(['Sl No.', 'Profile Name', 'Code', 'Color', 'Length (Mtr.)', 'Pcs', 'Billing Qty', 'Unit', 'Used Qty (Mtr.)', 'Wastage (Mtr.)', 'Wastage %']);
   bars.forEach((b, i) => rows.push([i + 1, b.name, b.code, barColour(b), r2(b.barLength), b.pcs, r3(b.billingQty), 'Mtr', r3(b.usedQty), r3(b.wastage), b.wastagePct]));
   rows.push([null, 'Total :', null, null, null, sumBy(bars, (b) => b.pcs), r3(sumBy(bars, (b) => b.billingQty)), 'Mtr', r3(sumBy(bars, (b) => b.usedQty)), r3(sumBy(bars, (b) => b.wastage)), null]);
+  const added = addedProfileLines(data);
+  if (added.length) {
+    rows.push([], ['Added profiles (entries added in Pricing)'], ['Sl No.', 'Profile Name', 'Code', 'Color', 'Qty', 'Unit']);
+    added.forEach((l, i) => rows.push([i + 1, l.name, l.code || '', l.color || '', r3(l.qty), l.unit]));
+  }
   addSheet(wb, 'Profile BOQ', rows, [7, 40, 16, 18, 12, 7, 12, 7, 14, 14, 10]);
 }
 

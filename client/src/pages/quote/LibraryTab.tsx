@@ -79,7 +79,7 @@ export function LibraryTab({ quoteId, onSelected }: { quoteId: number; onSelecte
   const rows = data?.rows || [];
 
   return (
-    <div className="list-card" style={{ flex: 1, minHeight: 0 }}>
+    <div className="list-card" style={{ flex: 1, minHeight: 0 }} data-tour="quote-library">
       <div className="toolbar">
         <span className="fw-600">Library designs</span>
         <div className="grow" />

@@ -223,7 +223,7 @@ export function RolesPage() {
                 <div className="adm-card-desc">Tick what each role is allowed to do. The Administrator role always has every permission.</div>
               </div>
             </div>
-            <div className="table-wrap">
+            <div className="table-wrap" data-tour="settings-roles">
               <table className="table adm-matrix">
                 <thead>
                   <tr>

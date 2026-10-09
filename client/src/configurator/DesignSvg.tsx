@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { DesignData, LeafNode } from '../lib/types';
 import { layout, normaliseSizes, paneNumbers, sashCount, type LeafRect } from './model';
 
@@ -6,6 +6,36 @@ export const FRAME = 62;
 export const MULL = 74;
 export const SASH = 58;
 export const GLASS_FILL = '#b8e2f4';
+
+// uPVC glazing details (visible widths, mm)
+const BEAD = 18; // room-side glazing bead
+const LIP = 11; // exterior glazing lip of the profile
+const GASKET = 4; // EPDM gasket line hugging the glass
+const GASKET_COLOR = '#2b2f33';
+
+/** Level of detail. 'auto' derives it from the rendered size (screen pixels per mm). */
+export type DesignDetail = 'auto' | 'low' | 'medium' | 'high';
+
+type Side = 't' | 'b' | 'l' | 'r';
+const SIDES: Side[] = ['t', 'b', 'l', 'r'];
+/** Gradient vector (objectBoundingBox) of each member of a rectangular ring, running from its outer to its inner edge. */
+const SIDE_VEC: Record<Side, [number, number, number, number]> = { t: [0, 0, 0, 1], b: [0, 1, 0, 0], l: [0, 0, 1, 0], r: [1, 0, 0, 0] };
+/** Light from the top left: how much the outer / inner rounded edge of each member faces the light (-1..1). */
+const SIDE_LIT: Record<Side, [number, number]> = { t: [1, -0.9], b: [-0.85, 0.8], l: [0.75, -0.7], r: [-0.7, 0.65] };
+
+/** The four 45° mitred members of a rectangular ring with outer rect x/y/w/h and face width f. */
+function trapezoids(x: number, y: number, w: number, h: number, f: number): Record<Side, string> {
+  return {
+    t: `M${x} ${y}H${x + w}L${x + w - f} ${y + f}H${x + f}Z`,
+    b: `M${x} ${y + h}H${x + w}L${x + w - f} ${y + h - f}H${x + f}Z`,
+    l: `M${x} ${y}L${x + f} ${y + f}V${y + h - f}L${x} ${y + h}Z`,
+    r: `M${x + w} ${y}L${x + w - f} ${y + f}V${y + h - f}L${x + w} ${y + h}Z`,
+  };
+}
+
+/** Welded 45° mitre seams of a ring. */
+const mitrePath = (x: number, y: number, w: number, h: number, f: number) =>
+  `M${x} ${y}L${x + f} ${y + f}M${x + w} ${y}L${x + w - f} ${y + f}M${x} ${y + h}L${x + f} ${y + h - f}M${x + w} ${y + h}L${x + w - f} ${y + h - f}`;
 
 export type DimTarget = { kind: 'width' } | { kind: 'height' } | { kind: 'child'; splitId: string; index: number; value: number };
 
@@ -30,6 +60,8 @@ export interface DesignSvgProps {
   fontScale?: number;
   /** Multiplier for line weights – use a large value for tiny icon renders. */
   strokeScale?: number;
+  /** Profile detail (bevel shading, glazing bead, gasket, drainage). Default 'auto': picked from the rendered size. */
+  detail?: DesignDetail;
 }
 
 export function shade(hex: string, amt: number): string {
@@ -48,6 +80,34 @@ function isLight(hex: string) {
   if (!m) return true;
   const n = parseInt(m[1], 16);
   return ((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114 > 170;
+}
+
+/** Brightens a colour by scaling its channels (keeps the hue of dark laminates instead of washing them out). */
+function brighten(hex: string, k: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const ch = (v: number) => Math.max(0, Math.min(255, Math.round(v * (1 + k) + 6 * k)));
+  return `#${((ch((n >> 16) & 255) << 16) | (ch((n >> 8) & 255) << 8) | ch(n & 255)).toString(16).padStart(6, '0')}`;
+}
+
+/** Shade of a uPVC profile face turned towards (lit > 0) or away from (lit < 0) the light. */
+function profileTone(base: string, light: boolean, lit: number): string {
+  if (lit >= 0) return light ? shade(base, 0.85 * lit) : brighten(base, 0.42 * lit);
+  return shade(base, (light ? 0.17 : 0.34) * lit);
+}
+
+/** Gradient stops across a uPVC member: rounded outer edge, flat satin face, rounded inner edge. */
+function profileStops(base: string, light: boolean, outer: number, inner: number): [number, string][] {
+  const t = (lit: number) => profileTone(base, light, lit);
+  return [
+    [0, t(outer * 0.4 - 0.55)],
+    [0.045, t(outer)],
+    [0.15, t(0.62)],
+    [0.8, t(0.45)],
+    [0.93, t(inner)],
+    [1, t(inner * 0.4 - 0.55)],
+  ];
 }
 
 interface DimSpec {
@@ -100,6 +160,7 @@ export function DesignSvg(props: DesignSvgProps) {
     style,
     fontScale = 1,
     strokeScale = 1,
+    detail = 'auto',
   } = props;
   const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
   const W = data.width;
@@ -111,10 +172,53 @@ export function DesignSvg(props: DesignSvgProps) {
   const hasSliding = leaves.some((l) => l.node.panel === 'sliding' || l.node.panel === 'monorail');
   const b = designBounds(data, { showDims, showFloor, showPlan: showPlan && hasSliding });
   const fs = b.fs * fontScale;
-  const stroke = shade(frameColor, isLight(frameColor) ? -0.35 : -0.45);
-  const sashColor = frameColor;
   const lw = Math.max(1.5, Math.max(W, H) / 700) * strokeScale;
   const glassStroke = shade(glassColor, -0.35);
+  const viewBox = props.viewBox || `${b.x} ${b.y} ${b.w} ${b.h}`;
+
+  // ---- level of detail: the same drawing is used from 40 px icons to a full-screen canvas ----
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [box, setBox] = useState<{ w: number; h: number } | null>(null);
+  const auto = detail === 'auto';
+  useLayoutEffect(() => {
+    const el = svgRef.current;
+    if (!auto || !el) return;
+    const read = () => {
+      const r = el.getBoundingClientRect();
+      const w = Math.round(r.width);
+      const h = Math.round(r.height);
+      setBox((p) => (p && Math.abs(p.w - w) < 2 && Math.abs(p.h - h) < 2 ? p : { w, h }));
+    };
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [auto]);
+  const vb = viewBox.split(/[\s,]+/).map(Number);
+  const measured = auto && box && box.w > 0 && box.h > 0 && vb[2] > 0 && vb[3] > 0 ? Math.min(box.w / vb[2], box.h / vb[3]) : 0;
+  // screen pixels per mm
+  const q = detail === 'low' ? 0.03 : detail === 'medium' ? 0.1 : detail === 'high' ? 0.6 : measured || (strokeScale >= 3 ? 0.03 : 0.1);
+  const shaded = q >= 0.045; // bevel shading, gasket, glass reflection
+  const fine = q >= 0.11; // glazing bead, drainage slots, sliding track & interlock
+  const crisp = q >= 0.26; // sash shadows, handle roses
+  const pxmm = (n: number) => n / q; // n screen pixels in mm
+
+  // ---- uPVC palette ----
+  const light = isLight(frameColor);
+  const edge = shaded ? shade(frameColor, light ? -0.5 : -0.55) : shade(frameColor, light ? -0.64 : -0.6); // profile outlines
+  const seam = shade(frameColor, light ? -0.3 : -0.4); // welded mitres, bead joints, steps
+  const tone = (lit: number) => profileTone(frameColor, light, lit);
+  // outline weight: thin enough at icon size that the ~2 px white profiles still read as white
+  const ow = shaded ? Math.max(lw * 0.85, pxmm(0.75)) : Math.max(lw * 0.6, pxmm(0.6));
+  const seamW = Math.max(lw * 0.45, pxmm(0.5)); // seam weight
+  const fillOf = (kind: 'p' | 'b' | 'm', s: Side | 'v' | 'h') => (shaded ? `url(#${kind}${s}${uid})` : frameColor);
+  type Line = { c: string; w: number } | null;
+  const dark: Line = { c: edge, w: ow };
+  const soft: Line = { c: seam, w: seamW };
+  // icons: dark lines only on the outer silhouette and around the glass, light joints in between, so the
+  // ~2 px profiles still read as white uPVC
+  const joint: Line = shaded ? dark : soft;
 
   const insetFor = (x: number, y: number, w: number, h: number) => ({
     l: x <= 0.5 ? FRAME : MULL / 2,
@@ -172,18 +276,66 @@ export function DesignSvg(props: DesignSvgProps) {
     />
   );
 
-  const sashBox = (x: number, y: number, w: number, h: number, key: string, fill = glassColor, pattern?: string) => (
-    <g key={key}>
-      <rect x={x} y={y} width={w} height={h} fill={sashColor} stroke={stroke} strokeWidth={lw} />
-      <rect x={x + SASH} y={y + SASH} width={Math.max(1, w - 2 * SASH)} height={Math.max(1, h - 2 * SASH)} fill={pattern ? `url(#${pattern})` : fill} stroke={stroke} strokeWidth={lw * 0.8} />
-      {/* mitre lines */}
-      <path
-        d={`M${x} ${y}L${x + SASH} ${y + SASH}M${x + w} ${y}L${x + w - SASH} ${y + SASH}M${x} ${y + h}L${x + SASH} ${y + h - SASH}M${x + w} ${y + h}L${x + w - SASH} ${y + h - SASH}`}
-        stroke={stroke}
-        strokeWidth={lw * 0.6}
-      />
-    </g>
-  );
+  /** Four welded, mitred uPVC members (outer rect x/y/w/h, face width f). kind 'p' = frame / sash profile, 'b' = glazing bead. */
+  const ring = (x: number, y: number, w: number, h: number, f: number, key: string, kind: 'p' | 'b' = 'p', outer: Line = kind === 'b' ? soft : dark, inner: Line = kind === 'b' ? null : dark) => {
+    if (w <= 0.5 || h <= 0.5 || f <= 0) return null;
+    const ff = Math.min(f, w / 2, h / 2);
+    const tr = trapezoids(x, y, w, h, ff);
+    return (
+      <g key={key} pointerEvents="none">
+        {SIDES.map((s) => (
+          <path key={s} d={tr[s]} fill={fillOf(kind, s)} />
+        ))}
+        {shaded && <path d={mitrePath(x, y, w, h, ff)} fill="none" stroke={seam} strokeWidth={kind === 'b' ? seamW * 0.8 : seamW} />}
+        {outer && <rect x={x} y={y} width={w} height={h} fill="none" stroke={outer.c} strokeWidth={outer.w} />}
+        {inner && w > 2 * ff + 0.5 && h > 2 * ff + 0.5 && <rect x={x + ff} y={y + ff} width={w - 2 * ff} height={h - 2 * ff} fill="none" stroke={inner.c} strokeWidth={inner.w} />}
+      </g>
+    );
+  };
+
+  /** Glass (or an infill pattern) with a soft diagonal reflection. */
+  const glass = (x: number, y: number, w: number, h: number, key: string, fill: string = glassColor, reflect = true) =>
+    w > 0 && h > 0 ? (
+      <g key={key} pointerEvents="none">
+        <rect x={x} y={y} width={w} height={h} fill={fill} />
+        {shaded && reflect && <rect x={x} y={y} width={w} height={h} fill={`url(#gr${uid})`} />}
+      </g>
+    ) : null;
+
+  /** Black EPDM gasket line hugging the visible glass edge (lies on the bead / sash side of the edge). */
+  const gasket = (x: number, y: number, w: number, h: number, key: string) => {
+    if (w <= 0 || h <= 0) return null;
+    const g = shaded ? Math.max(GASKET, pxmm(0.85)) : ow;
+    return <rect key={key} x={x - g / 2} y={y - g / 2} width={w + g} height={h + g} fill="none" stroke={shaded ? GASKET_COLOR : edge} strokeWidth={g} pointerEvents="none" />;
+  };
+
+  // room side shows the glazing bead, the outside the profile's glazing lip
+  const beadW = outside ? LIP : BEAD;
+
+  /** uPVC sash: mitred profile ring, glass held by a glazing bead and an EPDM gasket. */
+  const sashBox = (x: number, y: number, w: number, h: number, key: string, fill = glassColor, pattern?: string) => {
+    const S = Math.min(SASH, w / 2, h / 2);
+    const gx = x + S;
+    const gy = y + S;
+    const gw = Math.max(1, w - 2 * S);
+    const gh = Math.max(1, h - 2 * S);
+    const bw = fine ? Math.min(beadW, S * 0.45) : 0;
+    return (
+      <g key={key}>
+        {glass(gx, gy, gw, gh, 'g', pattern ? `url(#${pattern})` : fill, !pattern)}
+        {ring(x, y, w, h, S, 'r', 'p', joint, shaded ? dark : null)}
+        {bw > 0 && ring(gx - bw, gy - bw, gw + 2 * bw, gh + 2 * bw, bw, 'bd', 'b')}
+        {gasket(gx, gy, gw, gh, 'gk')}
+      </g>
+    );
+  };
+
+  /** Soft shadow of an inward-opening sash that stands proud of the frame (light from the top left). */
+  const sashShadow = (x: number, y: number, w: number, h: number, key: string) => {
+    if (!crisp || outside) return;
+    const s = Math.max(5, pxmm(2));
+    overlay.push(<path key={key} d={`M${x + w} ${y + s}h${s}V${y + h + s}H${x + s}V${y + h}H${x + w}Z`} fill="#0b1520" opacity={0.12} pointerEvents="none" />);
+  };
 
   const openingLines = (x: number, y: number, w: number, h: number, hinge: 'left' | 'right' | 'top' | 'bottom', key: string) => {
     const ix = x + SASH;
@@ -201,10 +353,24 @@ export function DesignSvg(props: DesignSvgProps) {
   const handle = (x: number, y: number, vertical: boolean, key: string) => {
     const L = fs * 1.1;
     const T = fs * 0.22;
-    return vertical ? (
+    const lever = vertical ? (
       <rect key={key} x={x - T / 2} y={y - L / 2} width={T} height={L} rx={T / 2} fill="#374151" pointerEvents="none" />
     ) : (
       <rect key={key} x={x - L / 2} y={y - T / 2} width={L} height={T} rx={T / 2} fill="#374151" pointerEvents="none" />
+    );
+    if (!crisp) return lever;
+    // uPVC handle: rose plate on the sash profile, lever over it
+    const rw = T * 1.9;
+    const rl = T * 3.8;
+    return (
+      <g key={key} pointerEvents="none">
+        {vertical ? (
+          <rect x={x - rw / 2} y={y - L / 2 - T * 0.4} width={rw} height={rl} rx={rw / 2} fill={tone(0.5)} stroke={edge} strokeWidth={seamW} />
+        ) : (
+          <rect x={x - L / 2 - T * 0.4} y={y - rw / 2} width={rl} height={rw} rx={rw / 2} fill={tone(0.5)} stroke={edge} strokeWidth={seamW} />
+        )}
+        {lever}
+      </g>
     );
   };
 
@@ -226,7 +392,11 @@ export function DesignSvg(props: DesignSvgProps) {
     switch (n.panel) {
       case 'fixed':
       case 'fan': {
-        out.push(<rect key={`${k}g`} x={x} y={y} width={w} height={h} fill={glassColor} stroke={glassStroke} strokeWidth={lw * 0.6} />);
+        // glass glazed straight into the frame / mullions, held by a glazing bead
+        const bw = fine ? Math.min(beadW, w / 4, h / 4) : 0;
+        out.push(glass(x, y, w, h, `${k}g`, glassColor, n.panel === 'fixed'));
+        if (bw > 0) out.push(ring(x, y, w, h, bw, `${k}bd`, 'b'));
+        out.push(gasket(x + bw, y + bw, w - 2 * bw, h - 2 * bw, `${k}gk`));
         if (n.panel === 'fixed') panes.push({ x, y, w, h });
         if (n.panel === 'fan') {
           const r = Math.min(w, h) * 0.3;
@@ -255,7 +425,7 @@ export function DesignSvg(props: DesignSvgProps) {
         const pitch = 95;
         const count = Math.max(1, Math.floor(h / pitch));
         const pvc = n.louverType === 'fixed-pvc';
-        const bladeFill = pvc ? shade(frameColor, isLight(frameColor) ? -0.08 : 0.1) : glassColor;
+        const bladeFill = pvc ? tone(0.2) : glassColor;
         for (let i = 0; i < count; i++) {
           const sy = y + (h / count) * i + (h / count) * 0.12;
           const bh = (h / count) * 0.66;
@@ -264,7 +434,7 @@ export function DesignSvg(props: DesignSvgProps) {
               key={`${k}b${i}`}
               d={`M${x + w * 0.04} ${sy + bh * 0.25}L${x + w * 0.96} ${sy}V${sy + bh * 0.75}L${x + w * 0.04} ${sy + bh}Z`}
               fill={bladeFill}
-              stroke={pvc ? stroke : glassStroke}
+              stroke={pvc ? edge : glassStroke}
               strokeWidth={lw * 0.5}
               pointerEvents="none"
             />,
@@ -283,6 +453,7 @@ export function DesignSvg(props: DesignSvgProps) {
       case 'bottomhung':
       case 'mesh': {
         const isMesh = n.panel === 'mesh';
+        sashShadow(x, y, w, h, `${k}sh`);
         out.push(sashBox(x, y, w, h, `${k}s`, glassColor, isMesh ? `mesh${uid}` : undefined));
         if (!isMesh) panes.push({ x: x + SASH, y: y + SASH, w: w - 2 * SASH, h: h - 2 * SASH });
         const hg = flipHinge(n.hinge === 'right' ? 'right' : 'left');
@@ -304,6 +475,7 @@ export function DesignSvg(props: DesignSvgProps) {
       case 'twin': {
         const half = w / 2;
         const fm = SASH * 0.6;
+        sashShadow(x, y, w, h, `${k}sh`);
         out.push(sashBox(x, y, half + fm / 2, h, `${k}s1`));
         out.push(sashBox(x + half - fm / 2, y, half + fm / 2, h, `${k}s2`));
         panes.push({ x: x + SASH, y: y + SASH, w: half + fm / 2 - 2 * SASH, h: h - 2 * SASH });
@@ -328,6 +500,16 @@ export function DesignSvg(props: DesignSvgProps) {
           const idx = outside ? count - 1 - i : i;
           const sx = x + i * (sw - overlap);
           out.push(sashBox(sx, y, sw, h, `${k}s${i}`));
+          if (fine && i > 0 && h > 2 * SASH + 1) {
+            // interlock profile on the meeting stile of the sash in front
+            const iw = SASH * 0.42;
+            out.push(
+              <g key={`${k}il${i}`} pointerEvents="none">
+                <rect x={sx} y={y + SASH} width={iw} height={h - 2 * SASH} fill={tone(-0.6)} opacity={0.55} />
+                <line x1={sx + iw} y1={y + SASH} x2={sx + iw} y2={y + h - SASH} stroke={seam} strokeWidth={seamW} />
+              </g>,
+            );
+          }
           panes.push({ x: sx + SASH, y: y + SASH, w: sw - 2 * SASH, h: h - 2 * SASH });
           const label = `S${first + idx}`;
           out.push(tag(sx + sw / 2, y + SASH + fs * 0.55, label, `${k}t${i}`, 0.55));
@@ -370,11 +552,11 @@ export function DesignSvg(props: DesignSvgProps) {
       panes.forEach((p, pi) => {
         for (let r = 1; r <= n.georgian!.rows; r++) {
           const gy = p.y + (p.h * r) / (n.georgian!.rows + 1);
-          out.push(<rect key={`${k}gr${pi}-${r}`} x={p.x} y={gy - bar / 2} width={p.w} height={bar} fill={frameColor} stroke={stroke} strokeWidth={lw * 0.4} pointerEvents="none" />);
+          out.push(<rect key={`${k}gr${pi}-${r}`} x={p.x} y={gy - bar / 2} width={p.w} height={bar} fill={fillOf('m', 'h')} stroke={edge} strokeWidth={seamW} pointerEvents="none" />);
         }
         for (let c = 1; c <= n.georgian!.cols; c++) {
           const gx = p.x + (p.w * c) / (n.georgian!.cols + 1);
-          out.push(<rect key={`${k}gc${pi}-${c}`} x={gx - bar / 2} y={p.y} width={bar} height={p.h} fill={frameColor} stroke={stroke} strokeWidth={lw * 0.4} pointerEvents="none" />);
+          out.push(<rect key={`${k}gc${pi}-${c}`} x={gx - bar / 2} y={p.y} width={bar} height={p.h} fill={fillOf('m', 'v')} stroke={edge} strokeWidth={seamW} pointerEvents="none" />);
         }
       });
     }
@@ -451,46 +633,81 @@ export function DesignSvg(props: DesignSvgProps) {
 
   leaves.forEach((lr) => nodes.push(...renderLeaf(lr)));
 
-  // mullions
+  // mullions: the visible profile is butted (T-joint) against the inner edges of whatever it runs into; the
+  // click target keeps the full centre-line length
   const mullionNodes = mullions.map((m) => {
     const selected = selectedId === m.nodeId;
-    const common = {
-      fill: frameColor,
-      stroke: selected ? '#1565c0' : stroke,
-      strokeWidth: selected ? lw * 3 : lw,
-      style: interactive ? { cursor: 'pointer' } : undefined,
-      onClick: interactive
-        ? (e: React.MouseEvent) => {
+    const hit = interactive
+      ? {
+          fill: 'transparent',
+          style: { cursor: 'pointer' },
+          onClick: (e: React.MouseEvent) => {
             e.stopPropagation();
             onSelect?.(selected ? null : m.nodeId);
-          }
-        : undefined,
-    };
+          },
+        }
+      : null;
+    const line = selected ? { c: '#1565c0', w: lw * 3 } : joint;
+    const a = m.dir === 'v' ? m.y : m.x;
+    const total = m.dir === 'v' ? H : W;
+    const s0 = a + (a <= 0.5 ? FRAME : MULL / 2);
+    const len = Math.max(0, a + m.length - (a + m.length >= total - 0.5 ? FRAME : MULL / 2) - s0);
     if (m.dir === 'v') {
       const x = mx(m.x) - MULL / 2;
       return (
         <g key={`m${m.label}`}>
-          <rect x={x} y={m.y} width={MULL} height={m.length} {...common} />
+          <rect x={x} y={s0} width={MULL} height={len} fill={fillOf('m', 'v')} stroke={line.c} strokeWidth={line.w} pointerEvents="none" />
+          {hit && <rect x={x} y={m.y} width={MULL} height={m.length} {...hit} />}
           {showLabels && tag(x + MULL / 2, m.y + m.length / 2 + fs * 1.4, m.label, `ml${m.label}`, 0.42)}
         </g>
       );
     }
     return (
       <g key={`m${m.label}`}>
-        <rect x={mx(m.x, m.length)} y={m.y - MULL / 2} width={m.length} height={MULL} {...common} />
+        <rect x={mx(s0, len)} y={m.y - MULL / 2} width={len} height={MULL} fill={fillOf('m', 'h')} stroke={line.c} strokeWidth={line.w} pointerEvents="none" />
+        {hit && <rect x={mx(m.x, m.length)} y={m.y - MULL / 2} width={m.length} height={MULL} {...hit} />}
         {showLabels && tag(mx(m.x, m.length) + m.length / 2 + fs * 2, m.y, m.label, `ml${m.label}`, 0.42)}
       </g>
     );
   });
 
-  // frame (mitred)
+  // frame: four welded, mitred members; drainage slots (drain caps outside) in the bottom member and the
+  // track lip of sliding windows
   const F = FRAME;
+  const frameDetails: ReactNode[] = [];
+  if (fine) {
+    const slotH = Math.max(5, pxmm(1.6));
+    const drain = (cx: number, key: string) => {
+      const cy = H - F * 0.36;
+      if (!outside) return <rect key={key} x={cx - 17} y={cy - slotH / 2} width={34} height={slotH} rx={slotH / 2} fill="#454b52" />;
+      const ch = Math.max(14, pxmm(3.6));
+      return (
+        <g key={key}>
+          <rect x={cx - 25} y={cy - ch / 2} width={50} height={ch} rx={ch / 2.2} fill={tone(0.75)} stroke={edge} strokeWidth={seamW} />
+          <rect x={cx - 14} y={cy + ch * 0.06} width={28} height={Math.max(3, pxmm(1.1))} rx={1.5} fill="#454b52" />
+        </g>
+      );
+    };
+    for (const lr of leaves) {
+      const n = lr.node;
+      const xa = lr.x + (lr.x <= 0.5 ? F : MULL / 2);
+      const xb = lr.x + lr.w - (lr.x + lr.w >= W - 0.5 ? F : MULL / 2);
+      const span = xb - xa;
+      if (span < 60) continue;
+      if (n.panel === 'sliding' || n.panel === 'monorail') {
+        if (lr.y + lr.h >= H - 0.5) frameDetails.push(<line key={`tb${n.id}`} x1={mx(xa)} y1={H - F * 0.7} x2={mx(xb)} y2={H - F * 0.7} stroke={seam} strokeWidth={seamW} />);
+        if (lr.y <= 0.5) frameDetails.push(<line key={`tt${n.id}`} x1={mx(xa)} y1={F * 0.7} x2={mx(xb)} y2={F * 0.7} stroke={seam} strokeWidth={seamW} />);
+      }
+      if (lr.y + lr.h < H - 0.5) continue;
+      const off = Math.min(Math.max(90, span * 0.16), span / 2);
+      const xs = span > 450 ? [xa + off, xb - off] : [xa + span / 2];
+      xs.forEach((cx, j) => frameDetails.push(drain(mx(cx), `dr${n.id}${j}`)));
+    }
+  }
   const frame = (
     <g key="frame" pointerEvents="none">
-      <path d={`M0 0H${W}L${W - F} ${F}H${F}Z`} fill={frameColor} stroke={stroke} strokeWidth={lw} />
-      <path d={`M0 ${H}H${W}L${W - F} ${H - F}H${F}Z`} fill={frameColor} stroke={stroke} strokeWidth={lw} />
-      <path d={`M0 0L${F} ${F}V${H - F}L0 ${H}Z`} fill={frameColor} stroke={stroke} strokeWidth={lw} />
-      <path d={`M${W} 0L${W - F} ${F}V${H - F}L${W} ${H}Z`} fill={frameColor} stroke={stroke} strokeWidth={lw} />
+      {ring(0, 0, W, H, F, 'fr', 'p', dark, joint)}
+      {frameDetails}
       {showLabels && tag(W - F - fs * 0.25, H - F - fs * 0.6, 'F1', 'f1', 0.55, 'end')}
     </g>
   );
@@ -570,6 +787,7 @@ export function DesignSvg(props: DesignSvgProps) {
         <g
           transform={d.vertical ? `rotate(-90 ${cx} ${cy})` : undefined}
           style={clickable ? { cursor: 'pointer' } : undefined}
+          data-tour={clickable ? 'cfg-dim' : undefined}
           onClick={clickable ? (e) => { e.stopPropagation(); onDimClick?.(d.target, e); } : undefined}
         >
           <rect x={cx - tw / 2} y={cy - th / 2} width={tw} height={th} rx={f * 0.15} fill="#fff" stroke={clickable ? '#cbd5e1' : 'none'} strokeWidth={lw * 0.6} />
@@ -625,9 +843,43 @@ export function DesignSvg(props: DesignSvgProps) {
     floorNodes.push(<g key="plan" pointerEvents="none">{parts}</g>);
   }
 
-  const viewBox = props.viewBox || `${b.x} ${b.y} ${b.w} ${b.h}`;
+  // profile shading – every gradient lives in this <svg> (unique ids) so html2canvas can rasterise it on its own
+  const grad = (id: string, v: [number, number, number, number], stops: [number, string][]) => (
+    <linearGradient key={id} id={`${id}${uid}`} x1={v[0]} y1={v[1]} x2={v[2]} y2={v[3]}>
+      {stops.map(([o, c], i) => (
+        <stop key={i} offset={o} stopColor={c} />
+      ))}
+    </linearGradient>
+  );
+  const shadeDefs = shaded
+    ? [
+        ...SIDES.map((s) => grad(`p${s}`, SIDE_VEC[s], profileStops(frameColor, light, SIDE_LIT[s][0], SIDE_LIT[s][1]))),
+        ...SIDES.map((s) =>
+          grad(`b${s}`, SIDE_VEC[s], [
+            [0, tone(-0.8)],
+            [0.16, tone(0.6)],
+            [0.5, tone(0.42)],
+            [1, tone(SIDE_LIT[s][1] * 0.85)],
+          ]),
+        ),
+        grad('mv', [0, 0, 1, 0], profileStops(frameColor, light, 0.75, -0.7)),
+        grad('mh', [0, 0, 0, 1], profileStops(frameColor, light, 1, -0.9)),
+        <linearGradient key="gr" id={`gr${uid}`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#ffffff" stopOpacity="0.3" />
+          <stop offset="0.2" stopColor="#ffffff" stopOpacity="0" />
+          <stop offset="0.5" stopColor="#ffffff" stopOpacity="0" />
+          <stop offset="0.56" stopColor="#ffffff" stopOpacity="0.34" />
+          <stop offset="0.61" stopColor="#ffffff" stopOpacity="0.06" />
+          <stop offset="0.66" stopColor="#ffffff" stopOpacity="0.22" />
+          <stop offset="0.7" stopColor="#ffffff" stopOpacity="0" />
+          <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+        </linearGradient>,
+      ]
+    : null;
+
   return (
     <svg
+      ref={svgRef}
       className={className}
       style={style}
       viewBox={viewBox}
@@ -657,6 +909,7 @@ export function DesignSvg(props: DesignSvgProps) {
           <rect width="30" height="30" fill="#fff" />
           <line x1="0" y1="0" x2="0" y2="30" stroke="#777" strokeWidth="6" />
         </pattern>
+        {shadeDefs}
       </defs>
       {nodes}
       {mullionNodes}

@@ -50,6 +50,7 @@ export function FavStar({ active, onToggle, className = '' }: { active: boolean;
     <button
       type="button"
       className={`adm-star ${active ? 'on' : ''} ${className}`}
+      data-tour="settings-fav"
       aria-pressed={active}
       aria-label={active ? 'Remove from favourite settings' : 'Add to favourite settings'}
       title={active ? 'Remove from favourites' : 'Add to favourites'}

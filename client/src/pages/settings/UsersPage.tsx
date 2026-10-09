@@ -63,7 +63,7 @@ export function UsersPage() {
       fill
       actions={
         canEdit && (
-          <Button variant="primary" icon={<Plus size={15} />} onClick={() => setEditing('new')}>
+          <Button variant="primary" icon={<Plus size={15} />} onClick={() => setEditing('new')} data-tour="settings-users-add">
             Add user
           </Button>
         )

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Plus, RotateCcw, Save } from 'lucide-react';
+import { Edit3, Lock, Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import type { GlassDef } from '../../lib/types';
-import { Badge, Button, Empty, Field, Input, Select } from '../../components/ui';
+import { Badge, Button, Empty, Field, IconButton, Input, Select } from '../../components/ui';
 import { Modal } from '../../components/overlay';
-import { useToast } from '../../components/feedback';
+import { useConfirm, useToast } from '../../components/feedback';
 import { useMasters } from '../../context/MastersContext';
-import { CODE_RE, RateInput, SearchBox, isValidRate, numStr, parseNum } from './shared';
+import { CODE_RE, RateInput, SearchBox, isValidRate, numStr, parseNum, useMasterUsage, usageText } from './shared';
 
 type Kind = GlassDef['kind'];
 
@@ -21,8 +21,33 @@ export function GlassTab({ onDirtyChange, readOnly = false }: { onDirtyChange: (
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<GlassDef | null>(null);
+  const confirm = useConfirm();
+  const { usage, refresh: refreshUsage } = useMasterUsage();
 
   const glasses = masters.glasses;
+
+  async function remove(g: GlassDef) {
+    const ok = await confirm({
+      title: `Delete ${KIND_LABEL[g.kind].toLowerCase()}?`,
+      message: (
+        <>
+          <b>{g.code}</b> {g.name} will be removed from the rate master and the glazing price levels.
+        </>
+      ),
+      confirmText: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.del(`/api/masters/glasses/${encodeURIComponent(g.id)}`);
+      await refresh();
+      await refreshUsage();
+      toast.success(`${g.name} deleted`);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  }
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return glasses.filter((g) => (!kind || g.kind === kind) && (!q || g.code.toLowerCase().includes(q) || g.name.toLowerCase().includes(q)));
@@ -92,7 +117,7 @@ export function GlassTab({ onDirtyChange, readOnly = false }: { onDirtyChange: (
             <Button size="sm" variant="primary" icon={<Save size={14} />} onClick={() => void save()} disabled={!dirty} loading={saving}>
               Save changes
             </Button>
-            <Button size="sm" variant="outline-primary" icon={<Plus size={14} />} onClick={() => setAdding(true)}>
+            <Button size="sm" variant="outline-primary" icon={<Plus size={14} />} onClick={() => setAdding(true)} data-tour="masters-add-glass">
               Add glass
             </Button>
           </>
@@ -110,6 +135,7 @@ export function GlassTab({ onDirtyChange, readOnly = false }: { onDirtyChange: (
               <th className="num" style={{ width: 160 }}>
                 Rate per sqm (₹)
               </th>
+              {!readOnly && <th style={{ width: 70 }} />}
             </tr>
           </thead>
           <tbody>
@@ -132,6 +158,24 @@ export function GlassTab({ onDirtyChange, readOnly = false }: { onDirtyChange: (
                       disabled={saving || readOnly}
                     />
                   </td>
+                  {!readOnly && (
+                    <td className="nowrap">
+                      <span className="row gap-4" style={{ flexWrap: 'nowrap' }}>
+                        <IconButton size="sm" tip="Edit" tipPos="left" onClick={() => setEditing(g)} disabled={saving} data-tour="masters-glass-edit">
+                          <Edit3 size={13} />
+                        </IconButton>
+                        {usage?.glasses[g.id] ? (
+                          <IconButton size="sm" tip={`${usageText(usage.glasses[g.id])} – cannot be deleted`} tipPos="left" aria-label={`${g.code} is in use`} disabled>
+                            <Lock size={13} />
+                          </IconButton>
+                        ) : (
+                          <IconButton size="sm" tip="Delete" tipPos="left" onClick={() => void remove(g)} disabled={saving || !usage}>
+                            <Trash2 size={13} />
+                          </IconButton>
+                        )}
+                      </span>
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -139,7 +183,8 @@ export function GlassTab({ onDirtyChange, readOnly = false }: { onDirtyChange: (
         </table>
         {visible.length === 0 && <Empty title={glasses.length ? 'Nothing matches your search' : 'No glass or mesh added yet'} />}
       </div>
-      {adding && <AddGlassModal onClose={() => setAdding(false)} />}
+      {adding && <AddGlassModal onClose={() => setAdding(false)} onSaved={() => void refreshUsage()} />}
+      {editing && <AddGlassModal glass={editing} kindLocked={!!usage?.glasses[editing.id]} onClose={() => setEditing(null)} onSaved={() => void refreshUsage()} />}
     </div>
   );
 }
@@ -150,12 +195,18 @@ interface GlassForm {
   kind: Kind;
   thickness: string;
   rate: string;
+  supplier: string;
 }
 
-function AddGlassModal({ onClose }: { onClose: () => void }) {
+/** Add glass / mesh, or edit it when `glass` is given (the code cannot change). */
+function AddGlassModal({ onClose, glass, kindLocked, onSaved }: { onClose: () => void; glass?: GlassDef; kindLocked?: boolean; onSaved?: () => void }) {
   const { masters, refresh } = useMasters();
   const toast = useToast();
-  const [f, setF] = useState<GlassForm>({ code: '', name: '', kind: 'glass', thickness: '4', rate: '' });
+  const [f, setF] = useState<GlassForm>(
+    glass
+      ? { code: glass.code, name: glass.name, kind: glass.kind, thickness: String(glass.thickness ?? ''), rate: String(glass.rate), supplier: glass.supplier || '' }
+      : { code: '', name: '', kind: 'glass', thickness: '4', rate: '', supplier: '' },
+  );
   const [errors, setErrors] = useState<Partial<Record<keyof GlassForm, string>>>({});
   const [saving, setSaving] = useState(false);
 
@@ -168,7 +219,9 @@ function AddGlassModal({ onClose }: { onClose: () => void }) {
     const e: Partial<Record<keyof GlassForm, string>> = {};
     const code = f.code.trim();
     const id = `${f.kind}-${code.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-    if (!code) e.code = 'Code is required';
+    if (glass) {
+      // code is fixed when editing
+    } else if (!code) e.code = 'Code is required';
     else if (!CODE_RE.test(code)) e.code = 'Use letters, numbers, dot, dash or underscore only';
     else if (masters.glasses.some((g) => g.code.toUpperCase() === code.toUpperCase() || g.id === id)) e.code = 'This glass already exists';
     if (!f.name.trim()) e.name = 'Name is required';
@@ -186,6 +239,25 @@ function AddGlassModal({ onClose }: { onClose: () => void }) {
     setErrors(e);
     if (Object.keys(e).length) return;
     setSaving(true);
+    if (glass) {
+      try {
+        const saved = await api.put<GlassDef>(`/api/masters/glasses/${encodeURIComponent(glass.id)}`, {
+          name: f.name.trim(),
+          ...(kindLocked ? {} : { kind: f.kind }),
+          thickness: f.kind === 'mesh' ? 0 : parseNum(f.thickness),
+          rate: parseNum(f.rate),
+          supplier: f.supplier.trim(),
+        });
+        await refresh();
+        onSaved?.();
+        toast.success(`${saved.name} updated`);
+        onClose();
+      } catch (err) {
+        toast.error(errorMessage(err));
+        setSaving(false);
+      }
+      return;
+    }
     try {
       const created = await api.post<GlassDef>('/api/masters/glasses', {
         code: f.code.trim().toUpperCase(),
@@ -193,8 +265,10 @@ function AddGlassModal({ onClose }: { onClose: () => void }) {
         kind: f.kind,
         thickness: f.kind === 'mesh' ? 0 : parseNum(f.thickness),
         rate: parseNum(f.rate),
+        supplier: f.supplier.trim() || undefined,
       });
       await refresh();
+      onSaved?.();
       toast.success(`${created.name} added`);
       onClose();
     } catch (err) {
@@ -207,7 +281,7 @@ function AddGlassModal({ onClose }: { onClose: () => void }) {
     <Modal
       open
       onClose={onClose}
-      title="Add glass / mesh"
+      title={glass ? `Edit ${glass.code}` : 'Add glass / mesh'}
       closeOnBackdrop={false}
       footer={
         <>
@@ -215,17 +289,17 @@ function AddGlassModal({ onClose }: { onClose: () => void }) {
             Cancel
           </Button>
           <Button variant="primary" type="submit" form="adm-add-glass" loading={saving}>
-            Add
+            {glass ? 'Save' : 'Add'}
           </Button>
         </>
       }
     >
       <form id="adm-add-glass" className="adm-form-grid" onSubmit={(e) => void submit(e)} noValidate>
         <Field label="Code" required error={errors.code} htmlFor="ag-code">
-          <Input id="ag-code" value={f.code} onChange={(e) => set('code', e.target.value)} invalid={!!errors.code} autoFocus maxLength={40} placeholder="e.g. CG0005PL" style={{ textTransform: 'uppercase' }} />
+          <Input id="ag-code" value={f.code} onChange={(e) => set('code', e.target.value)} invalid={!!errors.code} autoFocus={!glass} disabled={!!glass} maxLength={40} placeholder="e.g. CG0005PL" style={{ textTransform: 'uppercase' }} />
         </Field>
-        <Field label="Kind" required htmlFor="ag-kind">
-          <Select id="ag-kind" value={f.kind} onChange={(e) => set('kind', e.target.value as Kind)}>
+        <Field label="Kind" required htmlFor="ag-kind" hint={glass && kindLocked ? 'Used by designs – the kind cannot change' : undefined}>
+          <Select id="ag-kind" value={f.kind} onChange={(e) => set('kind', e.target.value as Kind)} disabled={!!glass && kindLocked}>
             <option value="glass">Glass</option>
             <option value="louver">Louver glass</option>
             <option value="mesh">Insect mesh</option>
@@ -250,6 +324,14 @@ function AddGlassModal({ onClose }: { onClose: () => void }) {
           <div className="input-rupee">
             <Input id="ag-rate" type="number" min={0} step="0.01" inputMode="decimal" value={f.rate} onChange={(e) => set('rate', e.target.value)} invalid={!!errors.rate} placeholder="0.00" />
           </div>
+        </Field>
+        <Field label="Supplier" hint="Optional" htmlFor="ag-sup" className="adm-span-2">
+          <Input id="ag-sup" value={f.supplier} list="ag-suppliers" maxLength={80} onChange={(e) => set('supplier', e.target.value)} placeholder="e.g. Saint-Gobain" />
+          <datalist id="ag-suppliers">
+            {masters.glazingSuppliers.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
         </Field>
       </form>
     </Modal>

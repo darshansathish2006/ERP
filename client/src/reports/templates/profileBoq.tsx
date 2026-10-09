@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
-import type { ProfileBar, ReportData } from '../../lib/types';
+import type { BomLine, ProfileBar, ReportData } from '../../lib/types';
 import { type Col, headHeight, rowHeight } from '../engine';
-import { EVA_LABEL_H, EmptyRow, EvaLabel, RTable, alignCls, colourName, f3 } from '../parts';
+import { EVA_LABEL_H, EmptyRow, EvaLabel, RTable, alignCls, colourName, f3, unitShort } from '../parts';
 import { addEvaHead, addProjectsBlock, internalBuilder, sumBy } from './common';
 
 const TITLE = 'Profiles BOQ';
@@ -17,6 +17,24 @@ export const BAR_COLS: Col[] = [
   { label: 'Billing Qty', w: 74, align: 'right' },
   { label: 'Unit', w: 50, align: 'center' },
 ];
+
+/** Profiles added as entries on the quote's Profile rate page (not bar-optimised). */
+export function addedProfileLines(data: ReportData): BomLine[] {
+  return (data.lines ?? []).filter((l) => l.added && (l.category === 'profile' || l.category === 'aluminium'));
+}
+
+export const ADDED_COLS: Col[] = [
+  { label: 'Sl No.', w: 38, align: 'center' },
+  { label: 'Profile Name', w: 254 },
+  { label: 'Code', w: 104 },
+  { label: 'Color', w: 98 },
+  { label: 'Qty', w: 74, align: 'right' },
+  { label: 'Unit', w: 54, align: 'center' },
+];
+
+export function addedCells(l: BomLine, i: number): string[] {
+  return [String(i + 1), l.name, l.code || '—', l.color || '—', f3(l.qty), unitShort(l.unit)];
+}
 
 export function profileBars(data: ReportData): ProfileBar[] {
   return (data.bars ?? []).filter((b) => b.category === 'profile' || b.category === 'aluminium');
@@ -104,5 +122,29 @@ export function buildProfileBoqPages(data: ReportData): ReactNode[][] {
       </RTable>
     ),
   });
+
+  const added = addedProfileLines(data).map((l, i) => ({ l, i }));
+  if (added.length) {
+    b.table({
+      items: added,
+      rowH: ({ l, i }) => rowHeight(ADDED_COLS, addedCells(l, i)),
+      headH: headHeight(ADDED_COLS),
+      title: (cont) => <EvaLabel>Added profiles (entries added in Pricing):{cont ? ' (contd.)' : ''}</EvaLabel>,
+      titleH: EVA_LABEL_H,
+      render: (rows) => (
+        <RTable cols={ADDED_COLS} className="rp-bars">
+          {rows.map(({ l, i }) => (
+            <tr key={`added-${l.id ?? i}`}>
+              {addedCells(l, i).map((c, j) => (
+                <td key={j} className={alignCls(ADDED_COLS[j].align)}>
+                  {c}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </RTable>
+      ),
+    });
+  }
   return b.done();
 }

@@ -1,13 +1,13 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowDownUp, CalendarDays, Check, ChevronDown, ChevronRight, Columns3, CopyPlus, ExternalLink, FileText, Filter, MoreVertical, Search, Star } from 'lucide-react';
+import { ArrowDownUp, CalendarDays, Check, ChevronDown, ChevronRight, Columns3, CopyPlus, Edit3, ExternalLink, FileText, Filter, MoreVertical, Search, Star } from 'lucide-react';
 import { api, errorMessage, qs } from '../lib/api';
 import type { Paged, QuoteListRow } from '../lib/types';
 import { dateFmt, inr, initials } from '../lib/format';
 import { useAuth } from '../context/AuthContext';
 import { useMasters } from '../context/MastersContext';
 import { useToast } from '../components/feedback';
-import { Badge, Button, Checkbox, Empty, Field, IconButton, Input, Pagination, Tabs } from '../components/ui';
+import { Badge, Button, Checkbox, Empty, Field, IconButton, Input, Pagination, Tabs, Textarea } from '../components/ui';
 import { Drawer, Menu, Modal, Popover } from '../components/overlay';
 import { Combobox } from '../components/Combobox';
 import { SavedViews } from '../components/SavedViews';
@@ -85,6 +85,7 @@ export default function QuotesListPage() {
   const [colsOpen, setColsOpen] = useState(false);
   const [revise, setRevise] = useState<QuoteListRow | null>(null);
   const [reviseTitle, setReviseTitle] = useState('');
+  const [editRow, setEditRow] = useState<QuoteListRow | null>(null);
   const rangeRef = useRef<HTMLButtonElement | null>(null);
   const colsRef = useRef<HTMLButtonElement | null>(null);
   const seq = useRef(0);
@@ -198,12 +199,13 @@ export default function QuotesListPage() {
     { label: 'View quotation', icon: <ExternalLink size={15} />, onClick: () => window.open(`/report/${r.id}/quotation`, '_blank') },
     { label: 'Create revision', icon: <CopyPlus size={15} />, onClick: () => { setRevise(r); setReviseTitle(''); } },
     { label: 'Set as default quote', icon: <Star size={15} />, disabled: r.isDefault, onClick: () => void setDefault(r) },
+    { label: 'Edit quote details', icon: <Edit3 size={15} />, onClick: () => setEditRow(r), dataTour: 'quotes-edit-details' },
   ];
   const rangeLabel = RANGES.find((r) => r.value === range)?.label;
   const filterCount = Object.values(filters).reduce((s, v) => s + v.length, 0);
   const renderRow = (r: QuoteListRow, child = false) => (
     <tr key={r.id} className={`clickable ${child ? 'child-row' : ''}`} onClick={() => navigate(`/quote/${r.id}`)}>
-      <td className="kebab-cell" onClick={(e) => e.stopPropagation()}>
+      <td className="kebab-cell" onClick={(e) => e.stopPropagation()} data-tour="quotes-expand">
         {!child && r.revisionCount > 1 ? (
           <button className={`expand-btn ${expanded[r.opportunityId] ? 'open' : ''}`} onClick={() => void toggleExpand(r)} aria-label="Show revisions">
             <ChevronRight size={14} />
@@ -212,7 +214,7 @@ export default function QuotesListPage() {
           <span className="expand-spacer" />
         )}
       </td>
-      <td className="kebab-cell" onClick={(e) => e.stopPropagation()}>
+      <td className="kebab-cell" onClick={(e) => e.stopPropagation()} data-tour="quotes-row-actions">
         <Menu
           placement="bottom-start"
           trigger={({ ref, onClick }) => (
@@ -240,11 +242,11 @@ export default function QuotesListPage() {
     <div className="opp-page">
       <div className="page-head">
         <div className="page-title">Quote</div>
-        <Button variant="primary" onClick={() => navigate('/opportunity/create')}>
+        <Button variant="primary" onClick={() => navigate('/opportunity/create')} data-tour="quotes-create">
           Create quote
         </Button>
       </div>
-      <div className="opp-tabs">
+      <div className="opp-tabs" data-tour="quotes-tabs">
         <Tabs
           value={tab}
           onChange={setTab}
@@ -257,7 +259,7 @@ export default function QuotesListPage() {
         />
       </div>
       <div className="list-card" style={{ flex: 1, minHeight: 0 }}>
-        <div className="toolbar">
+        <div className="toolbar" data-tour="quotes-toolbar">
           <SavedViews<ViewConfig>
             page="quotes"
             builtIns={[{ value: 'default', label: 'Default View' }]}
@@ -334,7 +336,7 @@ export default function QuotesListPage() {
             items={SORTS.map((s) => ({ label: s.label, icon: s.value === sort ? <Check size={14} /> : <span style={{ width: 14 }} />, onClick: () => setSort(s.value) }))}
           />
         </div>
-        <div className="table-wrap" style={{ flex: 1, position: 'relative' }}>
+        <div className="table-wrap" style={{ flex: 1, position: 'relative' }} data-tour="quotes-table">
           <table className="table quote-list-table">
             <thead>
               <tr>
@@ -451,6 +453,97 @@ export default function QuotesListPage() {
           <Input value={reviseTitle} onChange={(e) => setReviseTitle(e.target.value)} autoFocus placeholder="e.g. Colour change" onKeyDown={(e) => e.key === 'Enter' && void createRevision()} />
         </Field>
       </Modal>
+      {editRow && (
+        <EditQuoteDialog
+          row={editRow}
+          onClose={() => setEditRow(null)}
+          onSaved={async () => {
+            await load();
+            if (Array.isArray(expanded[editRow.opportunityId])) {
+              try {
+                const rows = await api.get<QuoteListRow[]>(`/api/opportunities/${editRow.opportunityId}/quotes`);
+                setExpanded((e) => ({ ...e, [editRow.opportunityId]: rows }));
+              } catch {
+                /* the list reload above already shows the change */
+              }
+            }
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/** Edit the quote's alias, revision title and remarks. */
+function EditQuoteDialog({ row, onClose, onSaved }: { row: QuoteListRow; onClose: () => void; onSaved: () => Promise<void> }) {
+  const toast = useToast();
+  const [alias, setAlias] = useState(row.alias);
+  const [title, setTitle] = useState(row.revisionTitle);
+  const [remarks, setRemarks] = useState<string | null>(null);
+  const [errors, setErrors] = useState<{ alias?: string; title?: string }>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .get<{ quote: { remarks: string } }>(`/api/quotes/${row.id}`)
+      .then((q) => alive && setRemarks(q.quote.remarks || ''))
+      .catch(() => alive && setRemarks(''));
+    return () => {
+      alive = false;
+    };
+  }, [row.id]);
+
+  async function save() {
+    const e: typeof errors = {};
+    const a = alias.trim().toUpperCase();
+    if (!/^[A-Z0-9][A-Z0-9 -]{0,9}$/.test(a)) e.alias = '1 to 10 letters or numbers, e.g. A or B2';
+    if (row.revisionNo > 1 && !title.trim()) e.title = 'A revision needs a title';
+    setErrors(e);
+    if (Object.keys(e).length) return;
+    setSaving(true);
+    try {
+      await api.put(`/api/quotes/${row.id}/meta`, { alias: a, revisionTitle: title.trim(), ...(remarks !== null ? { remarks: remarks.trim() } : {}) });
+      await onSaved();
+      toast.success(`${row.quoteNo} updated`);
+      onClose();
+    } catch (err) {
+      toast.error(errorMessage(err));
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Edit quote details · ${row.quoteNo}`}
+      size="sm"
+      footer={
+        <>
+          <Button onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button variant="primary" loading={saving} onClick={() => void save()} disabled={remarks === null}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <div className="col gap-12">
+        <div className="muted fs-12">
+          {row.projectName} · Rev {row.revisionNo}
+        </div>
+        <Field label="Quote alias" required error={errors.alias} hint="Short label of this quote, e.g. A, B">
+          <Input value={alias} maxLength={10} autoFocus style={{ textTransform: 'uppercase' }} invalid={!!errors.alias} onChange={(e) => setAlias(e.target.value)} />
+        </Field>
+        <Field label="Revision title" required={row.revisionNo > 1} error={errors.title}>
+          <Input value={title} maxLength={120} invalid={!!errors.title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Colour change" />
+        </Field>
+        <Field label="Remarks">
+          <Textarea value={remarks ?? ''} rows={3} maxLength={2000} disabled={remarks === null} onChange={(e) => setRemarks(e.target.value)} />
+        </Field>
+      </div>
+    </Modal>
   );
 }

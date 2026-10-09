@@ -220,7 +220,7 @@ export function ReportTab({ quoteId, onOpenPricing }: { quoteId: number; onOpenP
     if (def.tabular) items.push({ label: 'Download as Excel', icon: <FileSpreadsheet size={15} />, onClick: () => void start([def.key], 'excel'), disabled: working });
     items.push({ label: 'Copy link', icon: <Link2 size={15} />, onClick: () => void copyLink(def.key) });
     return (
-      <div key={def.key} className={`rcard ${selected.has(def.key) ? 'selected' : ''}`}>
+      <div key={def.key} className={`rcard ${selected.has(def.key) ? 'selected' : ''}`} data-tour="report-card">
         <div className="rcard-top">
           <Checkbox checked={selected.has(def.key)} onChange={(v) => toggleSelect(def.key, v)} title="Select report" />
           {fav && (
@@ -229,16 +229,16 @@ export function ReportTab({ quoteId, onOpenPricing }: { quoteId: number; onOpenP
             </span>
           )}
           <div className="grow" />
-          <IconButton size="sm" tip="Download report" onClick={() => void start([def.key], 'pdf')} disabled={working}>
+          <IconButton size="sm" tip="Download report" data-tour="report-download" onClick={() => void start([def.key], 'pdf')} disabled={working}>
             {downloading ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <CloudDownload size={16} />}
           </IconButton>
-          <IconButton size="sm" tip="View report" onClick={() => view(def.key)}>
+          <IconButton size="sm" tip="View report" data-tour="report-view" onClick={() => view(def.key)}>
             <Eye size={16} />
           </IconButton>
           <Menu
             items={items}
             trigger={({ ref, onClick, open }) => (
-              <IconButton ref={ref} size="sm" tip={open ? undefined : 'More'} active={open} onClick={onClick}>
+              <IconButton ref={ref} size="sm" tip={open ? undefined : 'More'} active={open} onClick={onClick} data-tour="report-card-menu">
                 <MoreVertical size={16} />
               </IconButton>
             )}
@@ -257,7 +257,7 @@ export function ReportTab({ quoteId, onOpenPricing }: { quoteId: number; onOpenP
 
   return (
     <div className="rtab">
-      <nav className="rtab-side" aria-label="Report categories">
+      <nav className="rtab-side" aria-label="Report categories" data-tour="report-categories">
         {CATEGORIES.map((c) => (
           <button
             key={c.key}
@@ -279,14 +279,14 @@ export function ReportTab({ quoteId, onOpenPricing }: { quoteId: number; onOpenP
         <div className="rtab-top">
           <div className="rtab-heading">{heading}</div>
           <div className="grow" />
-          <div className="toolbar-search">
+          <div className="toolbar-search" data-tour="report-search">
             <Search size={14} />
             <input className="input" placeholder="Search reports" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search reports" />
           </div>
         </div>
 
         {selectedKeys.length > 0 && (
-          <div className="rtab-selbar">
+          <div className="rtab-selbar" data-tour="report-selbar">
             <span>
               <b>{selectedKeys.length}</b> selected
             </span>
@@ -330,7 +330,7 @@ export function ReportTab({ quoteId, onOpenPricing }: { quoteId: number; onOpenP
         )}
       </div>
 
-      <button type="button" className="rtab-edge no-print" onClick={() => setDrawerOpen(true)} aria-label="Filter report">
+      <button type="button" className="rtab-edge no-print" data-tour="report-filter" onClick={() => setDrawerOpen(true)} aria-label="Filter report">
         <SlidersHorizontal size={14} />
         <span>Filter report</span>
       </button>

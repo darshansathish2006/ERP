@@ -10,7 +10,7 @@
     "dev:client": "vite --config client/vite.config.ts",
     "build": "tsc -p client/tsconfig.json --noEmit && vite build --config client/vite.config.ts",
     "start": "node --disable-warning=ExperimentalWarning server/index.js",
-    "seed": "node --disable-warning=ExperimentalWarning server/seed.js --demo",
+    "clear-data": "node --disable-warning=ExperimentalWarning server/seed.js --clear-data",
     "reset": "node --disable-warning=ExperimentalWarning server/seed.js --clean",
     "typecheck": "tsc -p client/tsconfig.json --noEmit",
     "test:engine": "node --disable-warning=ExperimentalWarning server/engine/selftest.js"

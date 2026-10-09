@@ -30,11 +30,14 @@ interface Form {
   rate: string;
   rate_lam: string;
   bar_length: string;
+  weight: string;
+  brand: string;
 }
 
 type Errors = Partial<Record<keyof Form, string>>;
 
-export function AddItemModal({ category, onClose }: { category: ItemCategory; onClose: () => void }) {
+/** Add an item, or edit one when `item` is given. `locked` lists why its code and category cannot change. */
+export function AddItemModal({ category, onClose, item, locked, onSaved }: { category: ItemCategory; onClose: () => void; item?: ItemDef; locked?: string[]; onSaved?: () => void }) {
   const { masters, refresh } = useMasters();
   const toast = useToast();
   const hardwareGroups = useMemo(() => {
@@ -42,16 +45,35 @@ export function AddItemModal({ category, onClose }: { category: ItemCategory; on
     if (!set.size) set.add('Fabrication Hardware');
     return [...set];
   }, [masters.items]);
-  const [f, setF] = useState<Form>({
-    code: '',
-    name: '',
-    category,
-    grp: hardwareGroups[0],
-    unit: defaultUnit(category),
-    rate: '',
-    rate_lam: '',
-    bar_length: DEFAULT_BAR[category],
-  });
+  const [f, setF] = useState<Form>(
+    item
+      ? {
+          code: item.code,
+          name: item.name,
+          category: item.category,
+          grp: item.grp,
+          unit: item.unit,
+          rate: String(item.rate),
+          rate_lam: item.color_variant && item.rate_lam != null ? String(item.rate_lam) : '',
+          bar_length: item.bar_length != null ? String(item.bar_length) : DEFAULT_BAR[item.category],
+          weight: item.weight ? String(item.weight) : '',
+          brand: item.brand || '',
+        }
+      : {
+          code: '',
+          name: '',
+          category,
+          grp: hardwareGroups[0],
+          unit: defaultUnit(category),
+          rate: '',
+          rate_lam: '',
+          bar_length: DEFAULT_BAR[category],
+          weight: '',
+          brand: '',
+        },
+  );
+  const isLocked = !!item && !!locked?.length;
+  const groups = item && !hardwareGroups.includes(item.grp) && item.category === 'hardware' ? [item.grp, ...hardwareGroups] : hardwareGroups;
   const [errors, setErrors] = useState<Errors>({});
   const [saving, setSaving] = useState(false);
 
@@ -70,13 +92,17 @@ export function AddItemModal({ category, onClose }: { category: ItemCategory; on
     const code = f.code.trim();
     if (!code) e.code = 'RM code is required';
     else if (!CODE_RE.test(code)) e.code = 'Use letters, numbers, dot, dash or underscore only';
-    else if (masters.items.some((i) => i.code.toUpperCase() === code.toUpperCase())) e.code = 'An item with this code already exists';
+    else if (masters.items.some((i) => i.code !== item?.code && i.code.toUpperCase() === code.toUpperCase())) e.code = 'An item with this code already exists';
     if (!f.name.trim()) e.name = 'Item name is required';
     if (!isValidRate(f.rate)) e.rate = 'Enter a rate of 0 or more';
     if (f.category === 'profile' && f.rate_lam.trim() && !isValidRate(f.rate_lam)) e.rate_lam = 'Enter a rate of 0 or more';
     if (hasBar(f.category)) {
       const bar = parseNum(f.bar_length);
       if (bar === null || bar <= 0 || bar > 12) e.bar_length = 'Enter a bar length between 0 and 12 m';
+    }
+    if (f.weight.trim()) {
+      const w = parseNum(f.weight);
+      if (w === null || w < 0 || w > 1000) e.weight = 'Enter a weight between 0 and 1000';
     }
     return e;
   }
@@ -87,6 +113,29 @@ export function AddItemModal({ category, onClose }: { category: ItemCategory; on
     setErrors(e);
     if (Object.keys(e).length) return;
     setSaving(true);
+    if (item) {
+      try {
+        const saved = await api.put<ItemDef>(`/api/masters/items/${encodeURIComponent(item.code)}`, {
+          ...(isLocked ? {} : { code: f.code.trim().toUpperCase(), category: f.category }),
+          name: f.name.trim(),
+          grp: f.category === 'hardware' ? f.grp : undefined,
+          unit: f.unit,
+          rate: parseNum(f.rate),
+          rate_lam: f.category === 'profile' ? (f.rate_lam.trim() ? parseNum(f.rate_lam) : parseNum(f.rate)) : undefined,
+          bar_length: hasBar(f.category) ? parseNum(f.bar_length) : undefined,
+          weight: f.weight.trim() ? parseNum(f.weight) : 0,
+          brand: f.brand.trim(),
+        });
+        await refresh();
+        onSaved?.();
+        toast.success(`Item ${saved.code} updated`);
+        onClose();
+      } catch (err) {
+        toast.error(errorMessage(err));
+        setSaving(false);
+      }
+      return;
+    }
     try {
       const created = await api.post<ItemDef>('/api/masters/items', {
         code: f.code.trim().toUpperCase(),
@@ -97,8 +146,11 @@ export function AddItemModal({ category, onClose }: { category: ItemCategory; on
         rate: parseNum(f.rate),
         rate_lam: f.category === 'profile' && f.rate_lam.trim() ? parseNum(f.rate_lam) : undefined,
         bar_length: hasBar(f.category) ? parseNum(f.bar_length) : undefined,
+        weight: f.weight.trim() ? parseNum(f.weight) : undefined,
+        brand: f.brand.trim() || undefined,
       });
       await refresh();
+      onSaved?.();
       toast.success(`Item ${created.code} added to ${CATEGORY_LABELS[f.category]}`);
       onClose();
     } catch (err) {
@@ -111,25 +163,26 @@ export function AddItemModal({ category, onClose }: { category: ItemCategory; on
     <Modal
       open
       onClose={onClose}
-      title="Add item"
+      title={item ? `Edit item · ${item.code}` : 'Add item'}
       closeOnBackdrop={false}
       footer={
         <>
           <Button onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button variant="primary" type="submit" form="adm-add-item" loading={saving}>
-            Add item
+          <Button variant="primary" type="submit" form="adm-add-item" loading={saving} data-tour={item ? 'masters-item-save' : 'masters-add-item-save'}>
+            {item ? 'Save' : 'Add item'}
           </Button>
         </>
       }
     >
       <form id="adm-add-item" className="adm-form-grid" onSubmit={(e) => void submit(e)} noValidate>
+        {isLocked && <div className="alert alert-info adm-span-2">Code and category are locked: used by {locked?.join('; ')}.</div>}
         <Field label="RM code" required error={errors.code} htmlFor="ai-code">
-          <Input id="ai-code" value={f.code} onChange={(e) => set('code', e.target.value)} invalid={!!errors.code} autoFocus maxLength={60} style={{ textTransform: 'uppercase' }} placeholder="e.g. PS62-UF-01" />
+          <Input id="ai-code" value={f.code} onChange={(e) => set('code', e.target.value)} invalid={!!errors.code} autoFocus={!item} disabled={isLocked} maxLength={60} style={{ textTransform: 'uppercase' }} placeholder="e.g. PS62-UF-01" />
         </Field>
         <Field label="Category" required htmlFor="ai-cat">
-          <Select id="ai-cat" value={f.category} onChange={(e) => changeCategory(e.target.value as ItemCategory)}>
+          <Select id="ai-cat" value={f.category} onChange={(e) => changeCategory(e.target.value as ItemCategory)} disabled={isLocked}>
             {(Object.keys(CATEGORY_LABELS) as ItemCategory[]).map((c) => (
               <option key={c} value={c}>
                 {CATEGORY_LABELS[c]}
@@ -138,12 +191,12 @@ export function AddItemModal({ category, onClose }: { category: ItemCategory; on
           </Select>
         </Field>
         <Field label="Item name" required error={errors.name} className="adm-span-2" htmlFor="ai-name">
-          <Input id="ai-name" value={f.name} onChange={(e) => set('name', e.target.value)} invalid={!!errors.name} maxLength={200} placeholder="e.g. 62MM 2 TRACK SLIDING FRAME" />
+          <Input id="ai-name" value={f.name} onChange={(e) => set('name', e.target.value)} invalid={!!errors.name} maxLength={200} autoFocus={!!item} placeholder="e.g. 62MM 2 TRACK SLIDING FRAME" />
         </Field>
         {f.category === 'hardware' && (
           <Field label="Group" htmlFor="ai-grp" hint="Used to group lines in the cost breakup reports">
             <Select id="ai-grp" value={f.grp} onChange={(e) => set('grp', e.target.value)}>
-              {hardwareGroups.map((g) => (
+              {groups.map((g) => (
                 <option key={g} value={g}>
                   {g}
                 </option>
@@ -177,6 +230,14 @@ export function AddItemModal({ category, onClose }: { category: ItemCategory; on
             <Input id="ai-bar" type="number" min={0} step="0.1" inputMode="decimal" value={f.bar_length} onChange={(e) => set('bar_length', e.target.value)} invalid={!!errors.bar_length} />
           </Field>
         )}
+        {hasBar(f.category) && (
+          <Field label="Weight (kg per m)" error={errors.weight} hint="Used for shutter weights" htmlFor="ai-weight">
+            <Input id="ai-weight" type="number" min={0} step="0.001" inputMode="decimal" value={f.weight} onChange={(e) => set('weight', e.target.value)} invalid={!!errors.weight} placeholder="0" />
+          </Field>
+        )}
+        <Field label="Brand" htmlFor="ai-brand" hint="Optional">
+          <Input id="ai-brand" value={f.brand} maxLength={80} onChange={(e) => set('brand', e.target.value)} placeholder="e.g. PROMINANCE" />
+        </Field>
       </form>
     </Modal>
   );

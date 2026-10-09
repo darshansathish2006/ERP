@@ -38,8 +38,8 @@ const GLASS_T = 6;
 const GLASS_BITE = 8; // glass edge hidden inside the profile
 const CASE_SASH_D = 60;
 const SASH_PROUD = 8; // casement sashes stand proud of the frame on the inside
-const SL_SASH_D = 18;
-const TRACK_STEP = 20;
+const SL_SASH_D = 28; // chunky multi-chamber uPVC sliding sash
+const TRACK_STEP = 30;
 const BEAD_W = 16;
 const BEAD_D = 18;
 const LIP_W = 12;
@@ -58,6 +58,8 @@ const BRICK_TILE_W = 480; // 2 bricks of 230 + 10 mortar
 const BRICK_TILE_H = 510; // 6 courses of 75 + 10 mortar
 const HATCH_TILE = 40;
 const MESH_TILE = 22;
+const WOOD_TILE = 900; // woodgrain foil: 900 mm along the grain per texture tile …
+const WOOD_REPEAT = 4; // … and 225 mm across it
 
 // camera
 const FOV = 35;
@@ -99,6 +101,24 @@ function isLight(hex: string): boolean {
   return ((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114 > 170;
 }
 
+/** Brown / red-brown laminate colours (walnut, oaks, mahogany …) get a woodgrain foil; greys and white stay plain. */
+function isWoodTone(hex: string): boolean {
+  const n = parseInt(hex.slice(1), 16);
+  const r = ((n >> 16) & 255) / 255;
+  const g = ((n >> 8) & 255) / 255;
+  const b = (n & 255) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  const l = (max + min) / 2;
+  if (d < 1e-6 || l < 0.06 || l > 0.75) return false;
+  const s = d / (1 - Math.abs(2 * l - 1));
+  let h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h *= 60;
+  if (h < 0) h += 360;
+  return s >= 0.2 && (h <= 50 || h >= 340);
+}
+
 function num(v: unknown, fallback: number, min: number): number {
   const n = Number(v);
   return Number.isFinite(n) ? Math.max(min, n) : fallback;
@@ -118,6 +138,8 @@ class Batch {
   readonly nrm: number[] = [];
   readonly uv: number[] = [];
   readonly tile: number;
+  /** Swap the box-mapped u / v, so a grain running along u follows vertical members too. */
+  swap = false;
 
   constructor(tile = 0) {
     this.tile = tile;
@@ -167,7 +189,8 @@ class Batch {
         u = p[0];
         v = p[2];
       }
-      this.uv.push(u / this.tile, v / this.tile);
+      if (this.swap) this.uv.push(v / this.tile, u / this.tile);
+      else this.uv.push(u / this.tile, v / this.tile);
     }
   }
 }
@@ -231,10 +254,13 @@ function ring(b: Batch, x0: number, y0: number, x1: number, y1: number, f: numbe
     prism(b, rectPts(x0, y0, x1, y1), z0, z1, null, lines);
     return;
   }
+  b.swap = false;
   prism(b, [[x0, y0], [x1, y0], [x1 - f, y0 + f], [x0 + f, y0 + f]], z0, z1, null, lines); // bottom
   prism(b, [[x0 + f, y1 - f], [x1 - f, y1 - f], [x1, y1], [x0, y1]], z0, z1, null, lines); // top
+  b.swap = true;
   prism(b, [[x0, y0], [x0 + f, y0 + f], [x0 + f, y1 - f], [x0, y1]], z0, z1, null, lines); // left
   prism(b, [[x1 - f, y0 + f], [x1, y0], [x1, y1], [x1 - f, y1 - f]], z0, z1, null, lines); // right
+  b.swap = false;
 }
 
 function batchMesh(b: Batch, mat: THREE.Material, bin: Disposable[], shadows: boolean): THREE.Mesh | null {
@@ -261,6 +287,8 @@ interface Profile {
   tris: number[][];
   uMin: number;
   uMax: number;
+  /** Outer vertices that get a longitudinal outline (all when absent) – rounded profiles only outline their feature edges. */
+  feat?: Set<number>;
 }
 
 /** A straight member: profile (u, z) swept along s from 0 to len, optionally 45° mitred at either end. */
@@ -286,10 +314,14 @@ interface Notch {
 
 const v2 = (p: P2) => new THREE.Vector2(p[0], p[1]);
 
-function makeProfile(outer: P2[], holes: P2[][], dz = 0): Profile {
+function makeProfile(outer: P2[], holes: P2[][], dz = 0, feat?: number[]): Profile {
   const sh = (pts: P2[]) => pts.map(([u, z]): P2 => [u, z + dz]);
   let o = sh(outer);
-  if (THREE.ShapeUtils.isClockWise(o.map(v2))) o = o.reverse();
+  let fs = feat;
+  if (THREE.ShapeUtils.isClockWise(o.map(v2))) {
+    o = o.reverse();
+    fs = feat?.map((i) => o.length - 1 - i);
+  }
   const hs = holes.map((h) => {
     const p = sh(h);
     return THREE.ShapeUtils.isClockWise(p.map(v2)) ? p : p.reverse();
@@ -301,7 +333,68 @@ function makeProfile(outer: P2[], holes: P2[][], dz = 0): Profile {
     uMin = Math.min(uMin, u);
     uMax = Math.max(uMax, u);
   }
-  return { outer: o, holes: hs, pts: o.concat(...hs), tris, uMin, uMax };
+  return { outer: o, holes: hs, pts: o.concat(...hs), tris, uMin, uMax, feat: fs ? new Set(fs) : undefined };
+}
+
+/**
+ * Polygon (u, z) whose corners are rounded with the given radii (0 = sharp), for the soft, rounded faces of uPVC
+ * profiles. Also returns the vertices that carry a feature outline: sharp corners and the middle of every arc.
+ */
+function rounded(corners: P2[], radii: number[], segs = 4): { pts: P2[]; feat: number[] } {
+  const pts: P2[] = [];
+  const feat: number[] = [];
+  const n = corners.length;
+  for (let i = 0; i < n; i++) {
+    const p = corners[i];
+    const a = corners[(i + n - 1) % n];
+    const c = corners[(i + 1) % n];
+    const r = radii[i] || 0;
+    const l1 = Math.hypot(a[0] - p[0], a[1] - p[1]);
+    const l2 = Math.hypot(c[0] - p[0], c[1] - p[1]);
+    if (r <= 0 || l1 < 1e-6 || l2 < 1e-6) {
+      feat.push(pts.length);
+      pts.push(p);
+      continue;
+    }
+    const d1: P2 = [(a[0] - p[0]) / l1, (a[1] - p[1]) / l1];
+    const d2: P2 = [(c[0] - p[0]) / l2, (c[1] - p[1]) / l2];
+    const theta = Math.acos(Math.max(-1, Math.min(1, d1[0] * d2[0] + d1[1] * d2[1])));
+    if (theta < 1e-3 || Math.PI - theta < 1e-3) {
+      feat.push(pts.length);
+      pts.push(p);
+      continue;
+    }
+    // tangent distance, limited so neighbouring fillets never overlap
+    let t = r / Math.tan(theta / 2);
+    const tMax = Math.min(l1, l2) * 0.49;
+    let rr = r;
+    if (t > tMax) {
+      t = tMax;
+      rr = t * Math.tan(theta / 2);
+    }
+    const bx = d1[0] + d2[0];
+    const by = d1[1] + d2[1];
+    const bl = Math.hypot(bx, by);
+    const dc = rr / Math.sin(theta / 2);
+    const cx = p[0] + (bx / bl) * dc;
+    const cy = p[1] + (by / bl) * dc;
+    const a0 = Math.atan2(p[1] + d1[1] * t - cy, p[0] + d1[0] * t - cx);
+    let da = Math.atan2(p[1] + d2[1] * t - cy, p[0] + d2[0] * t - cx) - a0;
+    while (da > Math.PI) da -= 2 * Math.PI;
+    while (da < -Math.PI) da += 2 * Math.PI;
+    for (let k = 0; k <= segs; k++) {
+      if (k === segs >> 1) feat.push(pts.length);
+      const ang = a0 + (da * k) / segs;
+      pts.push([cx + rr * Math.cos(ang), cy + rr * Math.sin(ang)]);
+    }
+  }
+  return { pts, feat };
+}
+
+/** Solid (unchambered) rounded profile for the regular 3D views. */
+function smooth(corners: P2[], radii: number[]): Profile {
+  const r = rounded(corners, radii);
+  return makeProfile(r.pts, [], 0, r.feat);
 }
 
 /** U-shaped steel reinforcement filling a chamber. */
@@ -494,6 +587,7 @@ function extrude(b: Batch, p: Profile, m: Member, lines: number[] | null, cut: C
     for (const s of [0, m.len]) for (const u of [p.uMin, p.uMax]) lo = Math.min(lo, m.o[1] + m.s[1] * s + m.u[1] * u);
     if (lo > cut.y + 0.5) return; // entirely in the removed half
   }
+  b.swap = Math.abs(m.s[1]) > 0.5; // grain runs along the member
   const half = m.len / 2;
   const s0 = (u: number) => (m.m0 ? Math.min(u, half) : 0);
   const s1 = (u: number) => (m.m1 ? Math.max(m.len - u, half) : m.len);
@@ -523,7 +617,7 @@ function extrude(b: Batch, p: Profile, m: Member, lines: number[] | null, cut: C
     for (let i = 0; i < ol.length; i++) {
       const [au, az] = ol[i];
       const [cu, cz] = ol[(i + 1) % ol.length];
-      seg(lines, at(m, s0(au), au, az), at(m, s1(au), au, az), null);
+      if (!p.feat || p.feat.has(i)) seg(lines, at(m, s0(au), au, az), at(m, s1(au), au, az), null);
       seg(lines, at(m, s0(au), au, az), at(m, s0(cu), cu, cz), null);
       seg(lines, at(m, s1(au), au, az), at(m, s1(cu), cu, cz), null);
     }
@@ -673,6 +767,59 @@ function sectionProfiles(D: number, zf: number, slidingTracks: number[]) {
   };
 }
 
+/**
+ * Rounded, solid uPVC profiles for the regular (uncut) 3D views: soft radiused edges, a sloped sight-line bevel on
+ * the room side and stepped sashes with a separate glazing bead. u runs from the member's outer edge inwards, z is
+ * model depth (+z = room side).
+ */
+function smoothProfiles(zf: number) {
+  const f = FRAME;
+  const h = MULL / 2;
+  const zg = GLASS_T / 2 + 0.5;
+  const memo = new Map<string, { body: Profile; bead: Profile | null }>();
+  return {
+    frame: smooth(
+      [[0, -zf], [f - 7, -zf], [f, -zf + 4], [f, zf - 6], [f - 15, zf], [0, zf]],
+      [2.5, 3, 1.5, 2.5, 6, 3.5],
+    ),
+    mull: smooth(
+      [[-h + 5, -zf], [h - 5, -zf], [h, -zf + 3], [h, zf - 6], [h - 14, zf], [-h + 14, zf], [-h, zf - 6], [-h, -zf + 3]],
+      [1.5, 1.5, 1.5, 2.5, 6, 6, 2.5, 1.5],
+    ),
+    /** Sash from z0 (outside) to z1 (room side) with the glass centred, glazed with a room-side bead unless it holds a mesh. */
+    sash(z0: number, z1: number, glazed: boolean) {
+      const key = `${z0}|${z1}|${glazed}`;
+      let p = memo.get(key);
+      if (!p) {
+        const S = SASH;
+        const zc = (z0 + z1) / 2;
+        const bw = Math.min(BEAD_W, S * 0.4);
+        const edge = Math.min(9, (z1 - z0) * 0.32); // sculptured room-side edge
+        if (glazed) {
+          const zo = zc - GLASS_T / 2 - 0.5;
+          const zi = zc + GLASS_T / 2 + 0.5;
+          const zb = z1 - 1.5;
+          p = {
+            body: smooth([[0, z0], [S - 3, z0], [S, z0 + 3], [S, zo], [S - bw, zo], [S - bw, z1], [0, z1]], [2.5, 1.5, 1, 0.6, 0, 1.2, edge]),
+            bead: smooth(
+              [[S - bw + 0.4, zi], [S, zi], [S, Math.min(zi + 4, zb - 1)], [S - Math.min(7, bw * 0.45), zb], [S - bw + 0.4, zb]],
+              [0, 0.5, 1, 3, 1],
+            ),
+          };
+        } else p = { body: smooth([[0, z0], [S, z0], [S, z1], [0, z1]], [2.5, 1.5, 1.5, edge]), bead: null };
+        memo.set(key, p);
+      }
+      return p;
+    },
+    // fixed glazing in the frame: room-side glazing bead and the exterior glazing lip
+    bead: smooth(
+      [[0, zg], [BEAD_W, zg], [BEAD_W, zg + 5], [BEAD_W - 7, GLASS_T / 2 + BEAD_D], [0, GLASS_T / 2 + BEAD_D]],
+      [0, 0.5, 1.2, 3.5, 1.2],
+    ),
+    lip: smooth([[0, -zf], [LIP_W - 3, -zf], [LIP_W, -zf + 3], [LIP_W, -zg], [0, -zg]], [0, 1.2, 1, 0.5, 0]),
+  };
+}
+
 /* ------------------------------------------------------------------ generated textures */
 
 interface TexCache {
@@ -680,6 +827,7 @@ interface TexCache {
   hatch?: THREE.CanvasTexture | null;
   mesh?: THREE.CanvasTexture | null;
   tri?: THREE.CanvasTexture | null;
+  wood?: THREE.CanvasTexture | null;
 }
 
 function mulberry32(seed: number) {
@@ -782,6 +930,44 @@ function drawMesh(): HTMLCanvasElement | null {
   return cv;
 }
 
+/** Seamless woodgrain foil (grain along u), near white so it tints with the laminate colour. */
+function drawWood(): HTMLCanvasElement | null {
+  const SW = 1024;
+  const SH = 256;
+  const c = canvas2d(SW, SH);
+  if (!c) return null;
+  const [cv, g] = c;
+  g.fillStyle = '#f7f7f7';
+  g.fillRect(0, 0, SW, SH);
+  const rnd = mulberry32(11);
+  // broad growth bands
+  for (let i = 0; i < 16; i++) {
+    const y = rnd() * SH;
+    const h = 6 + rnd() * 26;
+    g.fillStyle = rnd() < 0.6 ? `rgba(60,30,10,${(0.03 + rnd() * 0.07).toFixed(3)})` : `rgba(255,255,255,${(0.05 + rnd() * 0.08).toFixed(3)})`;
+    for (const o of [-SH, 0, SH]) g.fillRect(0, y + o, SW, h);
+  }
+  // fine, gently waving grain lines (whole periods across the tile so it repeats seamlessly)
+  for (let i = 0; i < 170; i++) {
+    const y0 = rnd() * SH;
+    const amp = 0.8 + rnd() * 4.5;
+    const k = 1 + Math.floor(rnd() * 3);
+    const ph = rnd() * Math.PI * 2;
+    g.strokeStyle = `rgba(50,24,6,${(0.05 + rnd() * 0.17).toFixed(3)})`;
+    g.lineWidth = 0.5 + rnd() * 1.6;
+    for (const o of [-SH, 0, SH]) {
+      g.beginPath();
+      for (let x = 0; x <= SW; x += 16) {
+        const y = y0 + o + amp * Math.sin((x / SW) * Math.PI * 2 * k + ph);
+        if (x === 0) g.moveTo(x, y);
+        else g.lineTo(x, y);
+      }
+      g.stroke();
+    }
+  }
+  return cv;
+}
+
 function drawTriangle(): HTMLCanvasElement | null {
   const c = canvas2d(64, 36);
   if (!c) return null;
@@ -875,6 +1061,8 @@ interface BuildOpts {
   wall: boolean;
   realistic: boolean;
   section: boolean;
+  /** Woodgrain laminate foil on the profiles. */
+  wood: boolean;
 }
 
 interface SurfOpts {
@@ -926,31 +1114,52 @@ function makeMaterials(o: BuildOpts, cache: TexCache, aniso: number, bin: Dispos
   const brick = cachedTexture(cache, 'brick', aniso, drawBricks, [1 / BRICK_TILE_W, 1 / BRICK_TILE_H]);
   const hatch = cachedTexture(cache, 'hatch', aniso, drawHatch, [1, 1]);
   const mesh = cachedTexture(cache, 'mesh', aniso, drawMesh, [1, 1]);
+  const light = isLight(o.frameColor);
+  const wood = o.wood ? cachedTexture(cache, 'wood', aniso, drawWood, [1, WOOD_REPEAT]) : null;
+  /** Satin uPVC – never metallic: a soft Phong sheen in the plain view, clear-coated plastic in the realistic view. */
+  const pvc = (color: string, extra: SurfOpts = {}, map: THREE.Texture | null = null): THREE.Material =>
+    keep(
+      real
+        ? new THREE.MeshPhysicalMaterial({
+            color,
+            map,
+            metalness: 0,
+            roughness: map ? 0.58 : 0.48,
+            clearcoat: map ? 0.15 : 0.35,
+            clearcoatRoughness: 0.4,
+            envMapIntensity: 0.8,
+            ...extra,
+          })
+        : new THREE.MeshPhongMaterial({ color, map, shininess: map ? 16 : 28, specular: map ? 0x1a1a1a : 0x2c2c2c, ...extra }),
+    );
+  // hardware follows the profile: white handles on white windows, dark ones on laminates
+  const hwColor = light ? '#f1f1ef' : o.wood ? '#3b2817' : '#1f2328';
   const sec = clip
     ? {
-        steel: surf('#a2aab2', 0.42, 0.6, cut),
-        capFrame: capMat(shade(o.frameColor, isLight(o.frameColor) ? -0.2 : -0.3)),
+        steel: surf('#9aa2a9', 0.6, 0.25, cut), // galvanised reinforcement inside the uPVC chambers
+        capFrame: capMat(shade(o.frameColor, light ? -0.2 : -0.3)),
         capSteel: capMat('#7b848d'),
-        capAlu: capMat('#98a1a9'),
+        capAlu: capMat(shade(o.frameColor, light ? -0.3 : -0.38)),
         capGlass: capMat(shade(o.glassColor, -0.28)),
         capWall: capMat('#b3a898'),
         cutLine: keep(new THREE.LineBasicMaterial({ color: '#1f2937', toneMapped: false })),
       }
     : null;
   return {
-    frame: surf(o.frameColor, 0.4, 0, outline ? { polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, ...cut } : cut),
+    frame: pvc(o.wood ? shade(o.frameColor, 0.06) : o.frameColor, outline ? { polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, ...cut } : cut, wood),
     glass: glass(real ? 0.3 : 0.38, 0.04),
     louver: glass(real ? 0.5 : 0.58, 0.3),
-    handle: surf('#2d3239', 0.35, 0.55, cut),
-    alu: surf('#c5ccd3', 0.35, 0.65, cut),
-    fanBody: surf('#e3eaef', 0.5, 0.1, { side: THREE.DoubleSide, ...clipOnly }),
-    fan: surf('#56636f', 0.45, 0.3, cut),
+    handle: pvc(hwColor, cut),
+    alu: pvc(shade(o.frameColor, light ? -0.05 : 0.08), cut), // louver carriers & sliding guide rails, in the profile colour
+    gasket: surf('#1c1e21', 0.85, 0, cut), // EPDM
+    fanBody: surf('#e3eaef', 0.5, 0, { side: THREE.DoubleSide, ...clipOnly }),
+    fan: surf('#56636f', 0.45, 0, cut),
     mesh: mesh
       ? surf('#ffffff', 0.85, 0, { map: mesh, transparent: true, depthWrite: false, side: THREE.DoubleSide, ...clipOnly })
       : surf('#7d8f9b', 0.85, 0, { transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide, ...clipOnly }),
     edge: keep(
       new THREE.LineBasicMaterial({
-        color: shade(o.frameColor, isLight(o.frameColor) ? -0.35 : -0.5),
+        color: shade(o.frameColor, light ? -0.32 : -0.45),
         toneMapped: false,
         ...(clip ? { clippingPlanes: [clip] } : {}),
       }),
@@ -1020,9 +1229,12 @@ function buildModel(input: DesignData, o: BuildOpts, cache: TexCache, aniso: num
       )
     : null;
 
+  // regular views: rounded solid uPVC profiles (the section view uses the chambered ones above)
+  const PP = SP ? null : smoothProfiles(zf);
+
   const mats = makeMaterials(o, cache, aniso, bin, cut ? new THREE.Plane(new THREE.Vector3(0, -1, 0), cutY) : null);
   const B = {
-    frame: new Batch(),
+    frame: new Batch(o.wood ? WOOD_TILE : 0),
     glass: new Batch(),
     louver: new Batch(),
     handle: new Batch(),
@@ -1030,6 +1242,7 @@ function buildModel(input: DesignData, o: BuildOpts, cache: TexCache, aniso: num
     fan: new Batch(),
     mesh: new Batch(MESH_TILE),
     steel: new Batch(),
+    gasket: new Batch(),
   };
   // section caps, one batch per fill colour
   const CB = { frame: new Batch(), steel: new Batch(), alu: new Batch(), glass: new Batch() };
@@ -1047,36 +1260,49 @@ function buildModel(input: DesignData, o: BuildOpts, cache: TexCache, aniso: num
     if (cut && ya < cut.y && cut.y < yb) cutRect(cb, cut, x0, x1, z0, z1);
   };
 
-  /* outer frame */
-  if (SP && W > 2 * FRAME + 1 && H > 2 * FRAME + 1) {
+  /* outer frame: four welded, mitred members */
+  if (W > 2 * FRAME + 1 && H > 2 * FRAME + 1) {
     for (const m of ringMembers(-W / 2, -H / 2, W / 2, H / 2)) {
-      ex(B.frame, CB.frame, SP.frame.body, m);
-      ex(B.steel, CB.steel, SP.frame.steel, m, false);
+      if (SP) {
+        ex(B.frame, CB.frame, SP.frame.body, m);
+        ex(B.steel, CB.steel, SP.frame.steel, m, false);
+      } else if (PP) ex(B.frame, CB.frame, PP.frame, m);
     }
   } else ring(B.frame, -W / 2, -H / 2, W / 2, H / 2, FRAME, -zf, zf, lines);
 
   /* mullions, trimmed to the inner edges of whatever they run into */
+  const mullion = (mm: Member) => {
+    if (SP) {
+      ex(B.frame, CB.frame, SP.mull.body, mm);
+      ex(B.steel, CB.steel, SP.mull.steel, mm, false);
+    } else if (PP) ex(B.frame, CB.frame, PP.mull, mm);
+  };
   for (const m of mullions) {
     if (m.dir === 'v') {
       const ya = m.y + (m.y <= 0.5 ? FRAME : MULL / 2);
       const yb = m.y + m.length - (m.y + m.length >= H - 0.5 ? FRAME : MULL / 2);
       if (yb - ya <= 0.5) continue;
-      if (SP) {
-        const mm: Member = { o: [X(m.x), Y(yb), 0], s: [0, 1, 0], u: [1, 0, 0], len: yb - ya, m0: false, m1: false };
-        ex(B.frame, CB.frame, SP.mull.body, mm);
-        ex(B.steel, CB.steel, SP.mull.steel, mm, false);
-      } else prism(B.frame, rectPts(X(m.x - MULL / 2), Y(yb), X(m.x + MULL / 2), Y(ya)), -zf, zf, null, lines);
+      mullion({ o: [X(m.x), Y(yb), 0], s: [0, 1, 0], u: [1, 0, 0], len: yb - ya, m0: false, m1: false });
     } else {
       const xa = m.x + (m.x <= 0.5 ? FRAME : MULL / 2);
       const xb = m.x + m.length - (m.x + m.length >= W - 0.5 ? FRAME : MULL / 2);
       if (xb - xa <= 0.5) continue;
-      if (SP) {
-        const mm: Member = { o: [X(xa), Y(m.y), 0], s: [1, 0, 0], u: [0, 1, 0], len: xb - xa, m0: false, m1: false };
-        ex(B.frame, CB.frame, SP.mull.body, mm);
-        ex(B.steel, CB.steel, SP.mull.steel, mm, false);
-      } else prism(B.frame, rectPts(X(xa), Y(m.y + MULL / 2), X(xb), Y(m.y - MULL / 2)), -zf, zf, null, lines);
+      mullion({ o: [X(xa), Y(m.y), 0], s: [1, 0, 0], u: [0, 1, 0], len: xb - xa, m0: false, m1: false });
     }
   }
+
+  /** Black EPDM gaskets hugging the glass on the room face (inner rect) and the outside face (outer rect), model coordinates. */
+  const gaskets = (zc: number, ri: [number, number, number, number] | null, ro: [number, number, number, number] | null) => {
+    const g = 4.5;
+    const z = zc + GLASS_T / 2;
+    for (const [r, z0, z1] of [
+      [ri, z, z + 2.2],
+      [ro, -z + 2 * zc - 2.2, 2 * zc - z],
+    ] as const) {
+      if (!r || r[2] - r[0] <= 2 * g + 2 || r[3] - r[1] <= 2 * g + 2) continue;
+      ring(B.gasket, r[0] - 1, r[1] - 1, r[2] + 1, r[3] + 1, g, z0, z1, null);
+    }
+  };
 
   /* helpers working in layout coordinates */
   const zs0 = zf + SASH_PROUD - CASE_SASH_D;
@@ -1105,7 +1331,8 @@ function buildModel(input: DesignData, o: BuildOpts, cache: TexCache, aniso: num
     const x1 = X(x + w);
     const y0 = Y(y + h);
     const y1 = Y(y);
-    if (SP && x1 - x0 > 2 * SASH + 1 && y1 - y0 > 2 * SASH + 1) {
+    const big = x1 - x0 > 2 * SASH + 1 && y1 - y0 > 2 * SASH + 1;
+    if (SP && big) {
       const sliding = z1 - z0 < CASE_SASH_D - 1;
       const ps = sliding ? SP.sliding(z0) : SP.casement;
       const bead = !sliding && infill === 'glass' ? SP.casement.bead : null;
@@ -1114,14 +1341,22 @@ function buildModel(input: DesignData, o: BuildOpts, cache: TexCache, aniso: num
         ex(B.steel, CB.steel, ps.steel, m, false);
         if (bead) ex(B.frame, CB.frame, bead, m);
       }
+    } else if (PP && big) {
+      const ps = PP.sash(z0, z1, infill === 'glass');
+      for (const m of ringMembers(x0, y0, x1, y1)) {
+        ex(B.frame, CB.frame, ps.body, m);
+        if (ps.bead) ex(B.frame, CB.frame, ps.bead, m);
+      }
     } else ring(B.frame, x0, y0, x1, y1, SASH, z0, z1, lines);
     const ix0 = x0 + SASH;
     const ix1 = x1 - SASH;
     const iy0 = y0 + SASH;
     const iy1 = y1 - SASH;
     if (ix1 - ix0 < 1 || iy1 - iy0 < 1) return;
-    if (infill === 'glass') pane(ix0, iy0, ix1, iy1, (z0 + z1) / 2);
-    else meshPlane(ix0, iy0, ix1, iy1, (z0 + z1) / 2);
+    if (infill === 'glass') {
+      pane(ix0, iy0, ix1, iy1, (z0 + z1) / 2);
+      gaskets((z0 + z1) / 2, [ix0, iy0, ix1, iy1], [ix0, iy0, ix1, iy1]);
+    } else meshPlane(ix0, iy0, ix1, iy1, (z0 + z1) / 2);
   };
 
   const rotY = new THREE.Matrix4().makeRotationY(Math.PI);
@@ -1161,18 +1396,26 @@ function buildModel(input: DesignData, o: BuildOpts, cache: TexCache, aniso: num
     const cy1 = Y(y);
     const outerMesh = () => meshPlane(cx0, cy0, cx1, cy1, -zf + 4);
 
+    // drainage slots on the outside face of the bottom frame member
+    if (ins.b === FRAME && w > 60) {
+      const off = Math.min(Math.max(90, w * 0.16), w / 2);
+      for (const dx of w > 450 ? [off, w - off] : [w / 2]) box(B.gasket, X(x + dx), -H / 2 + FRAME * 0.4, -zf - 0.3, 32, 5, 1.2);
+    }
+
     switch (n.panel) {
       case 'fixed':
       case 'fan': {
-        if (SP && w > 2 * BEAD_W + 1 && h > 2 * BEAD_W + 1) {
+        const bp = SP || PP;
+        if (bp && w > 2 * BEAD_W + 1 && h > 2 * BEAD_W + 1) {
           for (const m of ringMembers(cx0, cy0, cx1, cy1)) {
-            ex(B.frame, CB.frame, SP.bead, m);
-            ex(B.frame, CB.frame, SP.lip, m);
+            ex(B.frame, CB.frame, bp.bead, m);
+            ex(B.frame, CB.frame, bp.lip, m);
           }
         } else {
           ring(B.frame, cx0, cy0, cx1, cy1, BEAD_W, GLASS_T / 2, GLASS_T / 2 + BEAD_D, lines); // glazing bead
           ring(B.frame, cx0, cy0, cx1, cy1, LIP_W, -zf, -GLASS_T / 2, lines); // rebate lip
         }
+        gaskets(0, [cx0 + BEAD_W, cy0 + BEAD_W, cx1 - BEAD_W, cy1 - BEAD_W], [cx0 + LIP_W, cy0 + LIP_W, cx1 - LIP_W, cy1 - LIP_W]);
         const gb = SP ? SP.fixedBite : GLASS_BITE;
         if (n.panel === 'fixed') {
           pane(cx0, cy0, cx1, cy1, 0, gb);
@@ -1337,6 +1580,7 @@ function buildModel(input: DesignData, o: BuildOpts, cache: TexCache, aniso: num
   if (mats.sec) add(B.steel, mats.sec.steel, true);
   add(B.handle, mats.handle, true);
   add(B.alu, mats.alu, true);
+  add(B.gasket, mats.gasket, false);
   add(B.fan, mats.fan, true);
   add(B.glass, mats.glass, false);
   add(B.louver, mats.louver, false);
@@ -1744,7 +1988,8 @@ export function View3D(props: View3DProps): JSX.Element {
       const real = o.realistic;
       renderer.localClippingEnabled = o.section;
       renderer.toneMapping = real ? THREE.NeutralToneMapping : THREE.NoToneMapping;
-      renderer.toneMappingExposure = 1;
+      // keep white uPVC below clipping so its rounded edges, bevels and sash shadows stay visible
+      renderer.toneMappingExposure = real ? 0.8 : 1;
       renderer.shadowMap.enabled = real;
       if (real && !envRT) {
         const pmrem = new THREE.PMREMGenerator(renderer);
@@ -1754,12 +1999,12 @@ export function View3D(props: View3DProps): JSX.Element {
         pmrem.dispose();
       }
       scene.environment = real && envRT ? envRT.texture : null;
-      scene.environmentIntensity = 0.8;
+      scene.environmentIntensity = 0.48;
       ambient.visible = !real;
       hemi.visible = real;
       fill.visible = !real;
       back.visible = !real;
-      key.intensity = real ? 2.0 : 2.2;
+      key.intensity = real ? 3.1 : 2.2;
       key.castShadow = real;
 
       const sphere = next.bounds.getBoundingSphere(new THREE.Sphere());
@@ -1845,6 +2090,7 @@ export function View3D(props: View3DProps): JSX.Element {
       cache.hatch?.dispose();
       cache.mesh?.dispose();
       cache.tri?.dispose();
+      cache.wood?.dispose();
       envRT?.dispose();
       scene.environment = null;
       key.dispose();
@@ -1866,13 +2112,15 @@ export function View3D(props: View3DProps): JSX.Element {
     const d = JSON.parse(dataKey) as DesignData | null;
     if (!d || !d.root) return;
     try {
+      const fc = cssHex(frameColor, '#ffffff');
       ctx.apply(d, {
-        frameColor: cssHex(frameColor, '#ffffff'),
+        frameColor: fc,
         glassColor: cssHex(glassColor, GLASS_FILL),
         outside: view === 'outside',
         wall: !!wall,
         realistic: !!realistic,
         section: !!section,
+        wood: isWoodTone(fc),
       });
     } catch {
       // keep showing the previous model if a malformed design slips through

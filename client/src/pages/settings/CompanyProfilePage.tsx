@@ -173,7 +173,7 @@ export function CompanyProfilePage() {
       {!canEdit && <ReadOnlyNote />}
       <form className="card card-pad adm-narrow" onSubmit={(e) => void submit(e)} noValidate>
         <fieldset className="adm-fieldset" disabled={!canEdit || saving}>
-          <div className="adm-form-section">
+          <div className="adm-form-section" data-tour="settings-company-images">
             <div className="adm-section-title">Logos & quotation header</div>
             <div className="adm-img-grid">
               <ImageField label="Company logo" hint="Printed at the top-left of the quotation." value={form.logo} onChange={(v) => set('logo', v)} />

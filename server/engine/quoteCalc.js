@@ -70,6 +70,86 @@ export function bomForDesign(design, catalog, rateOverrides = {}, levelPrices = 
   return computeBOM({ ...design.data, glassId: design.glassId }, ctx);
 }
 
+// ---------- custom entries added on the quote's rate pages ----------
+
+/** Category of a custom quote entry → the BOM cost variable (and so the cost head) its amount adds to. */
+export const QUOTE_ITEM_VARS = {
+  profile: 'UPVCPROFILECOST',
+  aluminium: 'ALUMINIUMPROFILECOST',
+  reinforcement: 'RICOST',
+  hardware: 'HWCOST',
+  glass: 'GLASSCOST',
+  mesh: 'MESHCOST',
+};
+const QUOTE_ITEM_GROUPS = {
+  profile: 'Profile',
+  aluminium: 'Aluminium Profiles',
+  reinforcement: 'Reinforcement',
+  hardware: 'Additional Items',
+  glass: 'Glazing',
+  mesh: 'Mesh',
+};
+
+export function quoteItemDTO(r) {
+  const qty = Number(r.qty) || 0;
+  const rate = Number(r.rate) || 0;
+  return {
+    id: r.id,
+    category: r.category,
+    code: r.code || '',
+    name: r.name,
+    color: r.color || '',
+    unit: r.unit,
+    qty,
+    rate,
+    amount: qty * rate,
+    sort: r.sort,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export function loadQuoteItems(quoteId) {
+  return all('SELECT * FROM quote_items WHERE quote_id = ? ORDER BY sort, id', quoteId).map(quoteItemDTO);
+}
+
+/** Totals of the custom entries per BOM cost variable, or null when the quote has none (pricing is then untouched). */
+export function quoteItemVars(items) {
+  if (!items?.length) return null;
+  const vars = {};
+  for (const it of items) {
+    const v = QUOTE_ITEM_VARS[it.category];
+    if (v) vars[v] = (vars[v] || 0) + it.amount;
+  }
+  return vars;
+}
+
+/** The BOM with this design's per-unit share of the custom entries added to its cost variables. */
+export function withItemShare(bom, itemVars, share) {
+  if (!itemVars || !share) return bom;
+  const vars = { ...bom.vars };
+  for (const [k, v] of Object.entries(itemVars)) vars[k] = (Number(vars[k]) || 0) + v * share;
+  return { ...bom, vars };
+}
+
+/** Custom entries as BOM-style lines (flagged `added`) for the BOQ reports. */
+export function quoteItemLines(items) {
+  return items.map((it) => ({
+    code: it.code,
+    baseCode: it.code,
+    name: it.name,
+    grp: QUOTE_ITEM_GROUPS[it.category] || 'Additional Items',
+    category: it.category,
+    unit: it.unit,
+    qty: it.qty,
+    rate: it.rate,
+    amount: it.amount,
+    color: it.color,
+    added: true,
+    id: it.id,
+  }));
+}
+
 function addonPerUnit(design, bom) {
   return (design.addons || []).reduce((s, a) => {
     const amt = Number(a.amount) || 0;
@@ -89,14 +169,20 @@ export function calculateQuote(quoteId, { persist = true } = {}) {
   const levelPrices = loadLevelPrices(parseJSON(quoteRow.price_levels, {}));
   const boms = designs.map((d) => bomForDesign(d, catalog, rateOverrides, levelPrices));
   const totalArea = designs.reduce((s, d, i) => s + boms[i].areaSqft * d.qty, 0);
+  // Entries added on the rate pages are shared across the designs by area, like the lump-sum heads,
+  // so each design's price (and the quotation rows) add up to the project total.
+  const quoteItems = loadQuoteItems(quoteId);
+  const itemVars = quoteItemVars(quoteItems);
+  const itemTotal = quoteItems.reduce((s, it) => s + it.amount, 0);
 
   const results = designs.map((d, i) => {
     const bom = boms[i];
-    const price = priceDesign(bom, heads, {
+    const areaShare = totalArea ? bom.areaSqft / totalArea : 0;
+    const price = priceDesign(withItemShare(bom, itemVars, areaShare), heads, {
       calcType: d.calcType,
       manualSqftRate: d.manualSqftRate,
       addonPerUnit: addonPerUnit(d, bom),
-      areaShare: totalArea ? bom.areaSqft / totalArea : 0,
+      areaShare,
       qty: d.qty,
     });
     const system = catalog.systems.get(d.systemId);
@@ -118,8 +204,18 @@ export function calculateQuote(quoteId, { persist = true } = {}) {
       price,
       unitPrice: price.grand,
       totalPrice: price.grand * d.qty,
+      // per-unit raw-material share of the entries added on the rate pages
+      addedShare: itemVars ? itemTotal * areaShare : 0,
     };
   });
+
+  // With no designs there is no area to share the added entries over: price them as one extra unit
+  // (no labour, lump sums or per-design charges) so they still reach the project total.
+  let extra = null;
+  if (itemVars && !(totalArea > 0)) {
+    const vheads = heads.map((h) => (h.calcType === 'LumpSumPerDesign' ? { ...h, rate: 0 } : h));
+    extra = priceDesign({ areaSqft: 0, areaSqm: 0, vars: { ...itemVars } }, vheads, { calcType: 'auto', qty: 1, areaShare: 0 });
+  }
 
   // Project summary: every head summed over designs x qty.
   const summaryHeads = heads.map((h) => ({
@@ -129,10 +225,17 @@ export function calculateQuote(quoteId, { persist = true } = {}) {
     formula: h.formula,
     rate: h.rate,
     visibility: h.visibility,
-    value: results.reduce((s, r) => s + (r.price.heads.find((x) => x.name === h.name)?.value || 0) * r.qty, 0),
+    value:
+      results.reduce((s, r) => s + (r.price.heads.find((x) => x.name === h.name)?.value || 0) * r.qty, 0) +
+      (extra ? extra.heads.find((x) => x.name === h.name)?.value || 0 : 0),
+    ...(h.added ? { added: true } : {}),
   }));
-  const grand = results.reduce((s, r) => s + r.price.grand * r.qty, 0);
-  const basic = results.reduce((s, r) => s + r.price.basic * r.qty, 0);
+  let grand = results.reduce((s, r) => s + r.price.grand * r.qty, 0);
+  let basic = results.reduce((s, r) => s + r.price.basic * r.qty, 0);
+  if (extra) {
+    grand += extra.grand;
+    basic += extra.basic;
+  }
   const qty = results.reduce((s, r) => s + r.qty, 0);
   const areaSqm = results.reduce((s, r) => s + r.bom.areaSqm * r.qty, 0);
   const summary = {
@@ -146,7 +249,8 @@ export function calculateQuote(quoteId, { persist = true } = {}) {
     sqftRate: totalArea ? basic / totalArea : 0,
     sqftRateWithTax: totalArea ? grand / totalArea : 0,
     sqmRateWithTax: areaSqm ? grand / areaSqm : 0,
-    errors: [...new Set(results.flatMap((r) => r.price.errors))],
+    errors: [...new Set([...results.flatMap((r) => r.price.errors), ...(extra ? extra.errors : [])])],
+    addedItems: { count: quoteItems.length, amount: itemTotal },
   };
 
   if (persist) {
@@ -164,7 +268,7 @@ export function calculateQuote(quoteId, { persist = true } = {}) {
     );
   }
 
-  return { quote: quoteRow, heads, rateOverrides, levelPrices, designs: results, summary, catalog };
+  return { quote: quoteRow, heads, rateOverrides, levelPrices, designs: results, summary, catalog, quoteItems };
 }
 
 /** Items used across a quote, aggregated, for the rate pages and BOQ reports. */

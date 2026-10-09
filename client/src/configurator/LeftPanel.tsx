@@ -25,7 +25,7 @@ export const FLOORS = ['Basement', 'Ground floor', 'First floor', 'Second floor'
 
 function Section({ title, info, open, onToggle, children }: { title: string; info: string; open: boolean; onToggle: () => void; children: ReactNode }) {
   return (
-    <section className={`cfg-acc ${open ? 'open' : ''}`}>
+    <section className={`cfg-acc ${open ? 'open' : ''}`} data-tour={`cfg-sec-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
       <button className="cfg-acc-head" onClick={onToggle} aria-expanded={open}>
         <span className="row gap-4">
           {title}
@@ -147,7 +147,7 @@ export function LeftPanel({
             ))}
           </Select>
         </Field>
-        <div className="field">
+        <div className="field" data-tour="cfg-size">
           <label>Size (mm)</label>
           <div className="cfg-size">
             <span className="cfg-size-tag">W</span>

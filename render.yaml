@@ -12,11 +12,11 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "24"
-      # Admin login password for titanswindows1@gmail.com (the sales demo users share it).
+      # Admin login password for titanswindows1@gmail.com.
       # Leave blank to use the default from the README.
       - key: TITANS_ADMIN_PASSWORD
         sync: false
-    # The free plan has no persistent disk: the SQLite database is recreated (with demo data)
+    # The free plan has no persistent disk: the SQLite database is recreated (master data only)
     # on every deploy or restart. For data that survives, switch to a paid plan and add:
     # disk:
     #   name: titans-data

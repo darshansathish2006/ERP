@@ -89,7 +89,7 @@ export function SavedViews<C extends object>({
       <Menu
         placement="bottom-start"
         trigger={({ ref, onClick }) => (
-          <Button ref={ref} size="sm" variant="outline-primary" onClick={onClick}>
+          <Button ref={ref} size="sm" variant="outline-primary" onClick={onClick} data-tour="views-menu">
             {label}
             <ChevronDown size={13} />
           </Button>
@@ -120,7 +120,7 @@ export function SavedViews<C extends object>({
           })),
         ]}
       />
-      <Button size="sm" variant="ghost" icon={<Plus size={13} />} onClick={() => setCreateOpen(true)}>
+      <Button size="sm" variant="ghost" icon={<Plus size={13} />} onClick={() => setCreateOpen(true)} data-tour="views-create">
         Create custom view
       </Button>
       <Modal

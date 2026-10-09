@@ -296,7 +296,7 @@ export function PriceLevelPage({ category }: { category: LevelCategory }) {
     >
       {!canEdit && <ReadOnlyNote>You can view prices. Ask an administrator for the “Edit raw material and glass price levels” permission to change them.</ReadOnlyNote>}
       <div className="adm-pl">
-        <aside className="card adm-pl-levels" aria-label="Price levels">
+        <aside className="card adm-pl-levels" aria-label="Price levels" data-tour="settings-levels">
           <div className="adm-pl-levels-head">
             Price levels
             {levels && <span className="tab-count">{levels.length}</span>}

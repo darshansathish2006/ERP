@@ -7,7 +7,8 @@ import { DesignSvg } from './DesignSvg';
 import { DIVIDERS, TYPOLOGIES, TYPOLOGY_GROUPS, type DividerOption, type Typology } from './typologies';
 import { leaf, split, type Equalization } from './model';
 
-const ICON_FRAME = '#c3ccd6';
+/** Icons use the white uPVC look (white profiles, dark outlines) at their low level of detail. */
+const ICON_FRAME = '#fbfbfa';
 
 function iconData(root: DesignData['root']): DesignData {
   return { width: 1000, height: 1000, floorAperture: 0, root };
@@ -19,7 +20,7 @@ export function TypologyPanel({ onPick, systemType, onClose }: { onPick: (t: Typ
   const previews = useMemo(() => new Map(TYPOLOGIES.map((t) => [t.id, iconData(t.build(1000, 1000))])), []);
   const shown = TYPOLOGIES.filter((t) => !q.trim() || t.label.toLowerCase().includes(q.trim().toLowerCase()) || t.group.toLowerCase().includes(q.trim().toLowerCase()));
   return (
-    <div className="cfg-flyout cfg-typology">
+    <div className="cfg-flyout cfg-typology" data-tour="cfg-designs-flyout">
       <div className="cfg-flyout-head">
         <span className="fw-600">Designs</span>
         {onClose && (
@@ -42,7 +43,7 @@ export function TypologyPanel({ onPick, systemType, onClose }: { onPick: (t: Typ
               <div className="cfg-icon-grid">
                 {items.map((t) => (
                   <button key={t.id} className={`cfg-icon ${t.systemType && t.systemType !== systemType ? 'other-system' : ''}`} onClick={() => onPick(t)} data-tip={t.label} title={t.label}>
-                    <DesignSvg data={previews.get(t.id)!} frameColor={ICON_FRAME} showDims={false} showLabels={false} showNumbers={false} strokeScale={7} style={{ width: '100%', height: '100%' }} />
+                    <DesignSvg data={previews.get(t.id)!} frameColor={ICON_FRAME} showDims={false} showLabels={false} showNumbers={false} strokeScale={7} detail="low" style={{ width: '100%', height: '100%' }} />
                   </button>
                 ))}
               </div>
@@ -58,14 +59,14 @@ export function TypologyPanel({ onPick, systemType, onClose }: { onPick: (t: Typ
 export function DividerPanel({ onPick }: { onPick: (d: DividerOption) => void }) {
   const previews = useMemo(() => new Map(DIVIDERS.map((d) => [d.id, iconData(split(d.dir, d.ratios.map((r) => (r / d.ratios.reduce((a, b) => a + b, 0)) * 1000), d.ratios.map(() => leaf('fixed'))))])), []);
   return (
-    <div className="cfg-flyout cfg-divider">
+    <div className="cfg-flyout cfg-divider" data-tour="cfg-divider-flyout">
       <div className="cfg-group-title" style={{ padding: '10px 12px 6px' }}>
         Divider
       </div>
       <div className="cfg-icon-grid" style={{ padding: '0 10px 10px', gridTemplateColumns: 'repeat(4, 46px)' }}>
         {DIVIDERS.map((d) => (
           <button key={d.id} className="cfg-icon" onClick={() => onPick(d)} title={d.label} data-tip={d.label}>
-            <DesignSvg data={previews.get(d.id)!} frameColor={ICON_FRAME} showDims={false} showLabels={false} showNumbers={false} strokeScale={7} style={{ width: '100%', height: '100%' }} />
+            <DesignSvg data={previews.get(d.id)!} frameColor={ICON_FRAME} showDims={false} showLabels={false} showNumbers={false} strokeScale={7} detail="low" style={{ width: '100%', height: '100%' }} />
           </button>
         ))}
       </div>

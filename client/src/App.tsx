@@ -6,6 +6,7 @@ import { FeedbackProvider } from './components/feedback';
 import { PageLoading } from './components/ui';
 import { AppShell } from './layout/AppShell';
 import { LoginPage, RegisterPage, ResetPasswordPage } from './pages/auth/AuthPages';
+import { TourProvider } from './tour/TourProvider';
 
 const DashboardPage = lazy(() => import('./pages/Dashboard'));
 const OpportunityListPage = lazy(() => import('./pages/opportunity/OpportunityList'));
@@ -16,6 +17,7 @@ const ContactsPage = lazy(() => import('./pages/Contacts'));
 const MastersPage = lazy(() => import('./pages/Masters'));
 const SettingsPage = lazy(() => import('./pages/Settings'));
 const ProfilePage = lazy(() => import('./pages/Profile'));
+const GuidePage = lazy(() => import('./pages/Guide'));
 const ReportViewerPage = lazy(() => import('./reports/ReportViewer'));
 const SmartQuotePublicPage = lazy(() => import('./pages/SmartQuotePublic'));
 const NotFoundPage = lazy(() => import('./pages/NotFound'));
@@ -52,9 +54,11 @@ export default function App() {
                 element={
                   <RequireAuth>
                     <MastersProvider>
-                      <Suspense fallback={fullPage}>
-                        <Outlet />
-                      </Suspense>
+                      <TourProvider>
+                        <Suspense fallback={fullPage}>
+                          <Outlet />
+                        </Suspense>
+                      </TourProvider>
                     </MastersProvider>
                   </RequireAuth>
                 }
@@ -72,6 +76,7 @@ export default function App() {
                   <Route path="/masters" element={<Suspense fallback={<PageLoading />}><MastersPage /></Suspense>} />
                   <Route path="/settings" element={<Suspense fallback={<PageLoading />}><SettingsPage /></Suspense>} />
                   <Route path="/profile" element={<Suspense fallback={<PageLoading />}><ProfilePage /></Suspense>} />
+                  <Route path="/guide" element={<Suspense fallback={<PageLoading />}><GuidePage /></Suspense>} />
                   <Route path="*" element={<Suspense fallback={<PageLoading />}><NotFoundPage /></Suspense>} />
                 </Route>
               </Route>

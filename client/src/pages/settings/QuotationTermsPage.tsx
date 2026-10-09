@@ -170,7 +170,7 @@ export function QuotationTermsPage() {
       }
     >
       {!canEdit && <ReadOnlyNote />}
-      <div className="adm-jump" aria-label="Jump to section">
+      <div className="adm-jump" aria-label="Jump to section" data-tour="settings-terms">
         {SECTIONS.map((s) => (
           <button key={s.id} type="button" className="adm-jump-link" onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
             {s.label}

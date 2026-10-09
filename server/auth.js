@@ -34,7 +34,17 @@ export function sessionUser(u) {
   if (!u) return null;
   const perms = permissionsOf(u);
   const keys = ['settings.manage', 'rates.manage', 'opportunity.delete', 'quote.manualRate', 'reports.costing'];
-  return { ...publicUser(u), permissions: Object.fromEntries(keys.map((k) => [k, !!perms[k]])) };
+  return { ...publicUser(u), permissions: Object.fromEntries(keys.map((k) => [k, !!perms[k]])), tour: tourStateOf(u) };
+}
+
+export function tourStateOf(u) {
+  let s = {};
+  try {
+    s = JSON.parse(u?.tour_state || '{}') || {};
+  } catch {
+    s = {};
+  }
+  return { finishedAt: s.finishedAt || null, skippedAt: s.skippedAt || null, done: Array.isArray(s.done) ? s.done.map(String) : [] };
 }
 
 export function userFromToken(token) {

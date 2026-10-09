@@ -170,6 +170,8 @@ export interface MenuItem {
   disabled?: boolean;
   separator?: boolean;
   heading?: string;
+  /** data-tour anchor for the guided tour. */
+  dataTour?: string;
 }
 
 /** A trigger + dropdown menu. */
@@ -208,6 +210,7 @@ export function Menu({ trigger, items, placement = 'bottom-end' }: { trigger: (p
                   role="menuitem"
                   className={`menu-item ${it.danger ? 'danger' : ''}`}
                   disabled={it.disabled}
+                  data-tour={it.dataTour}
                   onClick={() => {
                     setOpen(false);
                     it.onClick?.();

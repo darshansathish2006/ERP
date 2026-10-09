@@ -91,9 +91,9 @@ export function RateMasterView({ tabs = ALL_RATE_TABS, onDirtyChange }: { tabs?:
         ) : tab === 'colors' ? (
           <ColorsTab readOnly={readOnly} />
         ) : tab === 'systems' ? (
-          <SystemsTab />
+          <SystemsTab readOnly={readOnly} />
         ) : (
-          <LibraryTab />
+          <LibraryTab readOnly={readOnly} />
         )}
       </div>
     </div>

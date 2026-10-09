@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
+  BookOpen,
   Boxes,
   ChevronDown,
   CircleHelp,
@@ -18,16 +19,17 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useMasters } from '../context/MastersContext';
 import { IconButton } from '../components/ui';
-import { Drawer, Menu, Modal, Popover } from '../components/overlay';
-import { Button } from '../components/ui';
+import { Menu, Popover } from '../components/overlay';
 import { initials } from '../lib/format';
+import { useTour } from '../tour/TourProvider';
 import { EvaLogo } from './EvaLogo';
 
 export const NAV = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutGrid },
-  { to: '/contacts', label: 'Contacts', icon: Contact },
-  { to: '/opportunity', label: 'Opportunities', icon: Lightbulb },
-  { to: '/quotes', label: 'Quotes', icon: FileText },
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutGrid, tour: 'nav-dashboard' },
+  { to: '/contacts', label: 'Contacts', icon: Contact, tour: 'nav-contacts' },
+  { to: '/opportunity', label: 'Opportunities', icon: Lightbulb, tour: 'nav-opportunity' },
+  { to: '/quotes', label: 'Quotes', icon: FileText, tour: 'nav-quotes' },
+  { to: '/guide', label: 'Guide', icon: BookOpen, tour: 'nav-guide' },
 ];
 
 const BANNER_KEY = 'titans.bannerDismissed';
@@ -63,34 +65,26 @@ export function MaintenanceBanner() {
   );
 }
 
-const TOUR = [
-  { title: 'Create an opportunity', body: 'Go to Opportunity → Create opportunity. Fill the 5 mandatory basic fields and 3 official fields, then choose "Save and create quote".' },
-  { title: 'Design the windows', body: 'In the Design tab choose a library design or "Create design". Use the configurator to set sizes, dividers, typologies, profile system, colour and glass, then Save.' },
-  { title: 'Review pricing', body: 'The Pricing tab shows the project price structure. Override item rates, add design add-on costs or freeze a manual SQFT rate from the side menu.' },
-  { title: 'Share the quotation', body: 'In the Report tab view or download the Quotation and BOQ reports, or use Quick quote to create a smart quote link for your customer.' },
-];
-
 export function TopbarActions() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [help, setHelp] = useState(false);
-  const [tour, setTour] = useState<number | null>(null);
+  const tour = useTour();
   const [apps, setApps] = useState(false);
   const appsRef = useRef<HTMLButtonElement | null>(null);
   return (
     <div className="topbar-actions">
-      <IconButton tip="Help" tipPos="bottom" onClick={() => setHelp(true)}>
+      <IconButton tip="Help & guide" tipPos="bottom" onClick={() => navigate('/guide')} data-tour="topbar-help">
         <CircleHelp size={17} />
       </IconButton>
-      <IconButton tip="Product tour" tipPos="bottom" onClick={() => setTour(0)}>
+      <IconButton tip="Tour of this page" tipPos="bottom" onClick={() => tour.startForPage()} disabled={tour.running} data-tour="topbar-tour">
         <PlayCircle size={17} />
       </IconButton>
-      <IconButton ref={appsRef} tip="Apps" tipPos="bottom" onClick={() => setApps((a) => !a)}>
+      <IconButton ref={appsRef} tip="Apps" tipPos="bottom" onClick={() => setApps((a) => !a)} data-tour="topbar-apps">
         <Grid3x3 size={17} />
       </IconButton>
       <Popover open={apps} onClose={() => setApps(false)} anchor={appsRef} placement="bottom-end">
         <div style={{ padding: 12, display: 'grid', gridTemplateColumns: 'repeat(3, 92px)', gap: 6 }}>
-          {[...NAV, { to: '/settings?page=raw-material-pricing', label: 'Rate Master', icon: Boxes }, { to: '/settings', label: 'Settings', icon: Settings }].map((n) => (
+          {[...NAV, { to: '/masters', label: 'Rate Master', icon: Boxes }, { to: '/settings', label: 'Settings', icon: Settings }].map((n) => (
             <button
               key={n.to}
               className="btn btn-ghost"
@@ -109,7 +103,7 @@ export function TopbarActions() {
       <Menu
         placement="bottom-end"
         trigger={({ ref, onClick }) => (
-          <button ref={ref} className="avatar-btn" onClick={onClick} aria-label="Account menu">
+          <button ref={ref} className="avatar-btn" onClick={onClick} aria-label="Account menu" data-tour="topbar-account">
             <span className="avatar">{initials(user?.name)}</span>
             <ChevronDown size={14} />
           </button>
@@ -118,6 +112,7 @@ export function TopbarActions() {
           { heading: user?.email || '' },
           { label: 'My profile', icon: <UserIcon size={15} />, onClick: () => navigate('/profile') },
           { label: 'Settings', icon: <Settings size={15} />, onClick: () => navigate('/settings') },
+          { label: 'Guide', icon: <BookOpen size={15} />, onClick: () => navigate('/guide') },
           { separator: true },
           {
             label: 'Logout',
@@ -130,82 +125,35 @@ export function TopbarActions() {
           },
         ]}
       />
-      <Drawer open={help} onClose={() => setHelp(false)} title="Help & support">
-        <div className="col gap-16">
-          {TOUR.map((t, i) => (
-            <div key={i}>
-              <h3 className="mb-8">
-                {i + 1}. {t.title}
-              </h3>
-              <p className="muted">{t.body}</p>
-            </div>
-          ))}
-          <div>
-            <h3 className="mb-8">Configurator shortcuts</h3>
-            <table className="table table-compact">
-              <tbody>
-                <tr><td>Undo / Redo</td><td className="nowrap">Ctrl + Z / Ctrl + Y</td></tr>
-                <tr><td>Save design</td><td>Ctrl + S</td></tr>
-                <tr><td>Deselect panel</td><td>Esc</td></tr>
-                <tr><td>Zoom</td><td>Mouse wheel</td></tr>
-                <tr><td>Pan</td><td>Drag the background</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div className="alert alert-info">For support contact TITANS WINDOWS – {''}
-            <a href="mailto:titanswindows1@gmail.com">titanswindows1@gmail.com</a>
-          </div>
-        </div>
-      </Drawer>
-      <Modal
-        open={tour !== null}
-        onClose={() => setTour(null)}
-        title={tour !== null ? `Product tour · ${tour + 1} of ${TOUR.length}` : ''}
-        size="sm"
-        footer={
-          <>
-            <Button disabled={!tour} onClick={() => setTour((t) => Math.max(0, (t ?? 0) - 1))}>
-              Back
-            </Button>
-            {tour !== null && tour < TOUR.length - 1 ? (
-              <Button variant="primary" onClick={() => setTour((t) => (t ?? 0) + 1)}>
-                Next
-              </Button>
-            ) : (
-              <Button variant="primary" onClick={() => setTour(null)}>
-                Finish
-              </Button>
-            )}
-          </>
-        }
-      >
-        {tour !== null && (
-          <div className="col">
-            <h3>{TOUR[tour].title}</h3>
-            <p className="muted">{TOUR[tour].body}</p>
-          </div>
-        )}
-      </Modal>
     </div>
   );
 }
 
 export function AppShell() {
+  const { epoch } = useTour();
   return (
     <div className="shell">
       <MaintenanceBanner />
       <div className="shell-main">
-        <nav className="sidebar" aria-label="Main navigation">
+        <nav className="sidebar" aria-label="Main navigation" data-tour="nav-sidebar">
           <div className="sidebar-logo">
             <EvaLogo size={28} />
           </div>
           {NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} className={({ isActive }) => `side-link ${isActive ? 'active' : ''}`} data-tip={n.label} data-tip-pos="right" aria-label={n.label}>
+            <NavLink
+              key={n.to}
+              to={n.to}
+              className={({ isActive }) => `side-link ${isActive ? 'active' : ''}`}
+              data-tip={n.label}
+              data-tip-pos="right"
+              aria-label={n.label}
+              data-tour={n.tour}
+            >
               <n.icon size={19} />
             </NavLink>
           ))}
           <div className="sidebar-spacer" />
-          <NavLink to="/settings" className={({ isActive }) => `side-link ${isActive ? 'active' : ''}`} data-tip="Settings" data-tip-pos="right" aria-label="Settings">
+          <NavLink to="/settings" className={({ isActive }) => `side-link ${isActive ? 'active' : ''}`} data-tip="Settings" data-tip-pos="right" aria-label="Settings" data-tour="nav-settings">
             <Settings size={19} />
           </NavLink>
         </nav>
@@ -213,7 +161,8 @@ export function AppShell() {
           <header className="topbar">
             <TopbarActions />
           </header>
-          <Outlet />
+          {/* Re-mounted after the tour's sample project is removed, so lists reload without it. */}
+          <Outlet key={epoch} />
         </div>
       </div>
     </div>

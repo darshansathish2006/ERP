@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, ChevronDown, Filter, RefreshCw, RotateCcw, Search } from 'lucide-react';
+import { Check, ChevronDown, Edit3, Filter, Plus, RefreshCw, RotateCcw, Search, Trash2 } from 'lucide-react';
 import { api, errorMessage } from '../../../lib/api';
+import type { QuoteItem, QuoteItemCategory } from '../../../lib/types';
 import { fixed2, qtyFmt } from '../../../lib/format';
 import { useAuth } from '../../../context/AuthContext';
 import { useConfirm, useToast } from '../../../components/feedback';
 import { Badge, Button, Empty, IconButton, Input, Select } from '../../../components/ui';
 import { Menu } from '../../../components/overlay';
+import { ITEM_CATEGORY_LABEL, ITEM_COST_HEAD, QuoteItemDialog } from './QuoteItemDialog';
 
 export type RateCategory = 'profile' | 'reinforcement' | 'hardware' | 'glass' | 'mesh';
 
@@ -33,12 +35,24 @@ interface RateRow {
 
 interface RatesResponse {
   rows: RateRow[];
+  /** Custom entries added to this quote for the page's category. */
+  added?: QuoteItem[];
+  designCount?: number;
   levels: { id: number; name: string; isDefault: boolean }[];
   levelId: number | null;
   levelCategory: string;
 }
 
 const UNIT_LABEL: Record<string, string> = { Pcs: 'Pieces', SQMT: 'Square Meter', Set: 'Set', CAN: 'CAN', Meter: 'Meter' };
+
+/** Entry types offered on each rate page. */
+const PAGE_ITEM_CATEGORIES: Record<RateCategory, QuoteItemCategory[]> = {
+  profile: ['profile', 'aluminium'],
+  reinforcement: ['reinforcement'],
+  hardware: ['hardware'],
+  glass: ['glass'],
+  mesh: ['mesh'],
+};
 
 export function RatePage({ quoteId, category, onSaved }: { quoteId: number; category: RateCategory; onSaved: () => Promise<void> }) {
   const toast = useToast();
@@ -53,6 +67,7 @@ export function RatePage({ quoteId, category, onSaved }: { quoteId: number; cate
   const [sort, setSort] = useState<{ key: 'code' | 'name' | 'unit' | 'rate'; dir: 1 | -1 } | null>(null);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [entry, setEntry] = useState<{ item: QuoteItem | null } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -62,7 +77,7 @@ export function RatePage({ quoteId, category, onSaved }: { quoteId: number; cate
       setSelected([]);
     } catch (e) {
       toast.error(errorMessage(e));
-      setRes({ rows: [], levels: [], levelId: null, levelCategory: category });
+      setRes({ rows: [], added: [], levels: [], levelId: null, levelCategory: category });
     }
   }, [quoteId, category, toast]);
 
@@ -70,7 +85,18 @@ export function RatePage({ quoteId, category, onSaved }: { quoteId: number; cate
     void load();
   }, [load]);
 
+  /** Refresh only the added entries, keeping unsaved rate edits. */
+  const refreshAdded = useCallback(async () => {
+    const r = await api.get<RatesResponse>(`/api/quotes/${quoteId}/rates?category=${category}`);
+    setRes((prev) => (prev ? { ...prev, added: r.added, designCount: r.designCount } : r));
+  }, [quoteId, category]);
+
   const rows = res?.rows;
+  const added = res?.added;
+  const shownAdded = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (added || []).filter((a) => !q || a.code.toLowerCase().includes(q) || a.name.toLowerCase().includes(q));
+  }, [added, search]);
   const groups = useMemo(() => [...new Set((rows || []).map((r) => r.group))], [rows]);
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -136,6 +162,33 @@ export function RatePage({ quoteId, category, onSaved }: { quoteId: number; cate
     }
   };
 
+  const removeEntry = async (it: QuoteItem) => {
+    const ok = await confirm({
+      title: 'Delete added entry',
+      message: (
+        <>
+          Remove <b>{it.name}</b> ({qtyFmt(it.qty, it.unit)} {it.unit} × ₹{fixed2(it.rate)} = ₹{fixed2(it.amount)}) from this quote?
+        </>
+      ),
+      confirmText: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.del(`/api/quote-items/${it.id}`);
+      await Promise.all([refreshAdded(), onSaved()]);
+      toast.success(`${it.name} removed from the quote`);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  };
+
+  const addButton = (
+    <Button size="sm" variant="primary" icon={<Plus size={13} />} onClick={() => setEntry({ item: null })} data-tour="rate-add-entry">
+      Add entry
+    </Button>
+  );
+
   const sortHead = (key: 'code' | 'name' | 'unit' | 'rate', label: string) => (
     <span className="th-sort" onClick={() => setSort((s) => (s?.key === key ? (s.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }))}>
       {label}
@@ -168,7 +221,7 @@ export function RatePage({ quoteId, category, onSaved }: { quoteId: number; cate
             <Menu
               placement="bottom-start"
               trigger={({ ref, onClick }) => (
-                <Button ref={ref} size="sm" variant="dark" onClick={onClick}>
+                <Button ref={ref} size="sm" variant="dark" onClick={onClick} data-tour="rate-level">
                   {levelName}
                   <ChevronDown size={13} />
                 </Button>
@@ -191,7 +244,8 @@ export function RatePage({ quoteId, category, onSaved }: { quoteId: number; cate
             <Search size={14} />
             <input className="input" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
-          <Button size="sm" variant="outline-primary" icon={<RefreshCw size={13} />} loading={syncing} onClick={updatePricing} disabled={!canEdit || !rows?.some((r) => r.overridden)}>
+          {addButton}
+          <Button size="sm" variant="outline-primary" icon={<RefreshCw size={13} />} loading={syncing} onClick={updatePricing} data-tour="rate-update" disabled={!canEdit || !rows?.some((r) => r.overridden)}>
             Update Pricing
           </Button>
           {groups.length > 1 && (
@@ -206,12 +260,13 @@ export function RatePage({ quoteId, category, onSaved }: { quoteId: number; cate
             </span>
           )}
         </div>
-        {rows && rows.length === 0 ? (
-          <Empty title="Price level not selected">
-            <span className="muted">No {TITLES[category].replace(' rate', '').toLowerCase()} items are used in this quote yet. Add designs in the Design tab.</span>
+        {rows && rows.length === 0 && !added?.length ? (
+          <Empty title={`No ${TITLES[category].replace(' rate', '').toLowerCase()} items in this quote yet`}>
+            <span className="muted">Items appear here from the designs in the Design tab. You can also add an entry with its own quantity and rate.</span>
+            <div className="mt-8">{addButton}</div>
           </Empty>
         ) : (
-          <div className="table-wrap" style={{ flex: 1 }}>
+          <div className="table-wrap" style={{ flex: 1 }} data-tour="rate-table">
             <table className="table">
               <thead>
                 <tr>
@@ -281,13 +336,72 @@ export function RatePage({ quoteId, category, onSaved }: { quoteId: number; cate
                     </tr>
                   );
                 })}
+                {rows && rows.length === 0 && (
+                  <tr>
+                    <td colSpan={category === 'hardware' ? 9 : 8} className="muted fs-12" style={{ textAlign: 'center' }}>
+                      No items from designs yet. Add designs in the Design tab.
+                    </td>
+                  </tr>
+                )}
               </tbody>
+              {(added?.length ?? 0) > 0 && (
+                <tbody className="added-entries">
+                  <tr className="added-head">
+                    <td colSpan={category === 'hardware' ? 9 : 8}>
+                      <span className="fw-600">Added entries</span>
+                      <span className="muted fs-12">
+                        {' '}
+                        · counted in {[...new Set((added || []).map((a) => ITEM_COST_HEAD[a.category]))].join(' and ')}
+                        {res.designCount ? ' and shared across the designs by area' : ''}
+                      </span>
+                    </td>
+                  </tr>
+                  {shownAdded.map((a) => (
+                    <tr key={`added-${a.id}`} className="added-row">
+                      <td />
+                      <td>{a.code || <span className="muted">—</span>}</td>
+                      <td>
+                        {a.name}
+                        <span style={{ marginLeft: 6 }}>
+                          <Badge tone="primary">Added</Badge>
+                        </span>
+                        {category === 'profile' && <span className="muted fs-11"> · {ITEM_CATEGORY_LABEL[a.category]}</span>}
+                        {a.color && category !== 'hardware' && <div className="muted fs-11">{a.color}</div>}
+                      </td>
+                      {category === 'hardware' && <td className="fs-12">{a.color || '—'}</td>}
+                      <td>{UNIT_LABEL[a.unit] || a.unit}</td>
+                      <td className="num">{qtyFmt(a.qty, a.unit)}</td>
+                      <td className="num">₹{fixed2(a.rate)}</td>
+                      <td className="num">{fixed2(a.amount)}</td>
+                      <td>
+                        <span className="row gap-4" style={{ flexWrap: 'nowrap' }}>
+                          <IconButton size="sm" tip="Edit entry" tipPos="left" onClick={() => setEntry({ item: a })} data-tour="rate-entry-edit">
+                            <Edit3 size={13} />
+                          </IconButton>
+                          <IconButton size="sm" tip="Delete entry" tipPos="left" onClick={() => void removeEntry(a)}>
+                            <Trash2 size={13} />
+                          </IconButton>
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {shownAdded.length === 0 && (
+                    <tr>
+                      <td colSpan={category === 'hardware' ? 9 : 8} className="muted fs-12" style={{ textAlign: 'center' }}>
+                        No added entries match your search
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              )}
             </table>
           </div>
         )}
         <div className="pricing-footer">
           <span className="muted fs-12">
-            {shown.length} item{shown.length === 1 ? '' : 's'} · Total {fixed2(shown.reduce((s, r) => s + r.qty * Number(valueOf(r) || 0), 0))}
+            {shown.length} item{shown.length === 1 ? '' : 's'}
+            {shownAdded.length ? ` + ${shownAdded.length} added` : ''} · Total{' '}
+            {fixed2(shown.reduce((s, r) => s + r.qty * Number(valueOf(r) || 0), 0) + shownAdded.reduce((s, a) => s + a.amount, 0))}
           </span>
           <div className="grow" />
           <Button variant="ghost" onClick={() => setEdits({})} disabled={!dirty}>
@@ -298,6 +412,17 @@ export function RatePage({ quoteId, category, onSaved }: { quoteId: number; cate
           </Button>
         </div>
       </div>
+      {entry && (
+        <QuoteItemDialog
+          quoteId={quoteId}
+          item={entry.item}
+          categories={entry.item ? [entry.item.category, ...PAGE_ITEM_CATEGORIES[category].filter((c) => c !== entry.item?.category)] : PAGE_ITEM_CATEGORIES[category]}
+          onClose={() => setEntry(null)}
+          onSaved={async () => {
+            await Promise.all([refreshAdded(), onSaved()]);
+          }}
+        />
+      )}
     </div>
   );
 }

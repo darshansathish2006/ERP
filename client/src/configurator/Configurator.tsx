@@ -544,7 +544,7 @@ export function Configurator({
               {dirty && <span className="cfg-dirty" title="Unsaved changes" />}
             </span>
           </div>
-          <div className="cfg-topbar-center">
+          <div className="cfg-topbar-center" data-tour="cfg-toolbar">
             <IconButton tip="Undo" tipPos="bottom" disabled={!historySize.past || is3d} onClick={undo}>
               <Undo2 size={16} />
             </IconButton>
@@ -577,10 +577,10 @@ export function Configurator({
             </IconButton>
           </div>
           <div className="row gap-8">
-            <Button size="sm" variant="ghost" className="cfg-summary-btn" onClick={() => setDrawer('summary')}>
+            <Button size="sm" variant="ghost" className="cfg-summary-btn" onClick={() => setDrawer('summary')} data-tour="cfg-summary-btn">
               Design summary
             </Button>
-            <div className="split-btn">
+            <div className="split-btn" data-tour="cfg-save">
               <Button variant="primary" size="sm" icon={<Save size={13} />} loading={saving} onClick={() => void save('stay')}>
                 Save Design
               </Button>
@@ -639,7 +639,7 @@ export function Configurator({
             >
               <Expand size={15} />
             </IconButton>
-            <button className="cfg-close" onClick={() => void requestClose()} aria-label="Close configurator" title="Close">
+            <button className="cfg-close" data-tour="cfg-close" onClick={() => void requestClose()} aria-label="Close configurator" title="Close">
               <X size={16} />
             </button>
           </div>
@@ -648,7 +648,7 @@ export function Configurator({
         <div className="cfg-main">
           {/* ---------------- left panel ---------------- */}
           {leftOpen && (
-            <aside className="cfg-left">
+            <aside className="cfg-left" data-tour="cfg-left">
               <LeftPanel
                 meta={meta}
                 onMeta={(m) => {
@@ -682,16 +682,17 @@ export function Configurator({
           )}
 
           {/* ---------------- tool strip ---------------- */}
-          <div className="cfg-strip">
-            <IconButton tip="Divider" tipPos="right" active={flyout === 'divider'} onClick={() => setFlyout((f) => (f === 'divider' ? null : 'divider'))} disabled={is3d}>
+          <div className="cfg-strip" data-tour="cfg-strip">
+            <IconButton tip="Divider" tipPos="right" data-tour="cfg-tool-divider" active={flyout === 'divider'} onClick={() => setFlyout((f) => (f === 'divider' ? null : 'divider'))} disabled={is3d}>
               <Columns2 size={17} />
             </IconButton>
-            <IconButton tip="Designs" tipPos="right" active={flyout === 'design'} onClick={() => setFlyout((f) => (f === 'design' ? null : 'design'))} disabled={is3d}>
+            <IconButton tip="Designs" tipPos="right" data-tour="cfg-tool-designs" active={flyout === 'design'} onClick={() => setFlyout((f) => (f === 'design' ? null : 'design'))} disabled={is3d}>
               <LayoutTemplate size={17} />
             </IconButton>
             <IconButton
               tip="Profile system"
               tipPos="right"
+              data-tour="cfg-tool-system"
               onClick={() => {
                 setPendingTypology(null);
                 setDrawer('system');
@@ -700,12 +701,13 @@ export function Configurator({
               <SquareDashedBottom size={17} />
             </IconButton>
             <div className="cfg-tools-sep" />
-            <IconButton tip="Colours" tipPos="right" onClick={() => setDrawer('color')}>
+            <IconButton tip="Colours" tipPos="right" data-tour="cfg-tool-colours" onClick={() => setDrawer('color')}>
               <Palette size={17} />
             </IconButton>
             <IconButton
               tip="Glass"
               tipPos="right"
+              data-tour="cfg-tool-glass"
               onClick={() => {
                 setLeftOpen(true);
                 toast.info('Choose the glass in the Glazing Item section of the left panel');
@@ -719,6 +721,7 @@ export function Configurator({
           <div className="cfg-stage">
             <div
               ref={canvasRef}
+              data-tour="cfg-canvas"
               className={`cfg-canvas ${showGrid && !is3d ? 'grid' : ''} ${is3d ? 'is3d' : ''}`}
               onWheel={onWheel}
               onPointerDown={onPointerDown}
@@ -777,8 +780,8 @@ export function Configurator({
             {flyout === 'design' && <TypologyPanel onPick={pickTypology} systemType={system.type} onClose={() => setFlyout(null)} />}
 
             {/* right-edge view buttons */}
-            <div className="cfg-views">
-              <button className={`cfg-view-btn ${mode === '3d' ? 'active' : ''}`} data-tip="3D view" data-tip-pos="left" onClick={() => setMode((m) => (m === '3d' ? '2d' : '3d'))}>
+            <div className="cfg-views" data-tour="cfg-views">
+              <button className={`cfg-view-btn ${mode === '3d' ? 'active' : ''}`} data-tip="3D view" data-tip-pos="left" data-tour="cfg-view-3d" onClick={() => setMode((m) => (m === '3d' ? '2d' : '3d'))}>
                 <Box size={17} />
               </button>
               <button className={`cfg-view-btn ${mode === 'section' ? 'active' : ''}`} data-tip="Section view" data-tip-pos="left" onClick={() => setMode((m) => (m === 'section' ? '2d' : 'section'))}>
@@ -890,7 +893,7 @@ export function Configurator({
             )}
 
             {/* live price */}
-            <div className="cfg-card cfg-summary" onClick={() => setDrawer('summary')} role="button" title="Open design summary">
+            <div className="cfg-card cfg-summary" data-tour="cfg-price" onClick={() => setDrawer('summary')} role="button" title="Open design summary">
               <div className="fs-11 muted">{system.name}</div>
               <div className="row gap-12 fs-12">
                 <span>
@@ -905,7 +908,7 @@ export function Configurator({
               </div>
             </div>
 
-            <div className="cfg-viewtoggle">
+            <div className="cfg-viewtoggle" data-tour="cfg-viewtoggle">
               <button className={view === 'inside' ? 'active' : ''} onClick={() => setView('inside')}>
                 Inside
               </button>

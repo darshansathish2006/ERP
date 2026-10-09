@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { all, get, run, tx, getSetting, parseJSON, UPLOAD_DIR, nextCounter } from '../db.js';
 import { DEFAULT_COMPANY } from '../engine/catalog.js';
-import { calculateQuote, aggregateLines, profileBars, bomForDesign, loadCatalog, designRowToModel, loadLevelPrices } from '../engine/quoteCalc.js';
+import { calculateQuote, aggregateLines, profileBars, bomForDesign, loadCatalog, designRowToModel, loadLevelPrices, loadQuoteItems, quoteItemVars, withItemShare, quoteItemLines } from '../engine/quoteCalc.js';
 import { priceDesign } from '../engine/pricing.js';
 import { round, sashCount, paneCount, LEVEL_CATEGORY } from '../engine/bom.js';
 import { requirePermission } from '../auth.js';
@@ -13,6 +13,8 @@ import { badRequest, notFound, str, num, intParam, rangeBounds } from './util.js
 import { validateDesignData } from './designUtil.js';
 import { opportunityDTO, createQuoteForOpportunity } from './opportunities.js';
 import { normaliseCostHeads } from './masters.js';
+import { copyQuoteItems } from './quoteExtras.js';
+import { chargeFromHead, chargeTargets, defaultChargeTarget, insertCharge } from './charges.js';
 
 const router = Router();
 export const publicRoutes = Router();
@@ -93,6 +95,7 @@ function designDTO(d, catalog) {
     autoBasic: d.price.autoBasic,
     sqftRate: d.price.sqftRate,
     autoSqftRate: d.price.autoSqftRate,
+    addedShare: d.addedShare || 0,
     sashes: d.bom.sashes,
     warnings: d.bom.warnings,
     createdAt: d.createdAt,
@@ -344,6 +347,7 @@ router.post('/quotes/:id/revise', (req, res) => {
         newId, d.ref, d.qty, d.name, d.location, d.floor, d.note, d.system_id, d.color_id, d.glass_id, d.data, d.calc_type, d.manual_sqft_rate, d.addons, d.sort, now, now,
       );
     }
+    copyQuoteItems(src.id, newId);
     if (req.body?.makeDefault) run('UPDATE quotes SET is_default = 0 WHERE opportunity_id = ? AND id != ?', src.opportunity_id, newId);
     return newId;
   });
@@ -436,6 +440,8 @@ router.get('/quotes/:id/pricing', (req, res) => {
     priceStructureName: calc.quote.price_structure_name,
     heads: calc.heads,
     summary: calc.summary,
+    chargeTargets: chargeTargets(calc.heads).map((h) => h.name),
+    defaultChargeTarget: defaultChargeTarget(calc.heads),
     designs: calc.designs.map((d) => ({
       id: d.id,
       ref: d.ref,
@@ -461,9 +467,25 @@ router.post('/quotes/:id/price-structure', (req, res) => {
   const q = quoteRow(req.params.id);
   const ps = get('SELECT * FROM price_structures WHERE id = ?', intParam(req.body?.priceStructureId, 0));
   if (!ps) throw notFound('Price structure');
-  run('UPDATE quotes SET price_structure_id = ?, price_structure_name = ?, cost_heads = ?, updated_at = ? WHERE id = ?', ps.id, ps.name, ps.cost_heads, new Date().toISOString(), q.id);
+  // Charges added to this quote are carried over to the new structure where they still fit.
+  let heads = parseJSON(ps.cost_heads, []);
+  const kept = [];
+  const dropped = [];
+  for (const h of parseJSON(q.cost_heads, []).filter((x) => x.added)) {
+    try {
+      if (heads.some((x) => x.name.toLowerCase() === h.name.toLowerCase())) throw new Error('name taken');
+      const next = insertCharge(heads, chargeFromHead(h, heads));
+      normaliseCostHeads(next);
+      heads = next;
+      kept.push(h.name);
+    } catch {
+      dropped.push(h.name);
+    }
+  }
+  const costHeads = kept.length ? JSON.stringify(normaliseCostHeads(heads)) : ps.cost_heads;
+  run('UPDATE quotes SET price_structure_id = ?, price_structure_name = ?, cost_heads = ?, updated_at = ? WHERE id = ?', ps.id, ps.name, costHeads, new Date().toISOString(), q.id);
   calculateQuote(q.id);
-  res.json({ ok: true });
+  res.json({ ok: true, keptCharges: kept, droppedCharges: dropped });
 });
 
 router.put('/quotes/:id/cost-heads', requirePermission('quote.manualRate'), (req, res) => {
@@ -521,10 +543,12 @@ router.get('/quotes/:id/rates', (req, res) => {
       color: l.color || '',
     };
   });
+  const addedCats = req.query.category === 'profile' || !req.query.category ? ['profile', 'aluminium'] : cats;
+  const added = calc.quoteItems.filter((it) => addedCats.includes(it.category));
   const levelCategory = req.query.category === 'mesh' ? 'glass' : req.query.category === 'aluminium' ? 'profile' : String(req.query.category || 'profile');
   const levels = all('SELECT * FROM price_levels WHERE category = ? ORDER BY is_default DESC, name', levelCategory).map((lv) => ({ id: lv.id, name: lv.name, isDefault: !!lv.is_default }));
   const selected = parseJSON(calc.quote.price_levels, {})[levelCategory] || levels.find((x) => x.isDefault)?.id || null;
-  res.json({ rows, levels, levelId: selected, levelCategory });
+  res.json({ rows, added, levels, levelId: selected, levelCategory, designCount: calc.designs.length });
 });
 
 router.put('/quotes/:id/rates', (req, res) => {
@@ -565,9 +589,15 @@ router.put('/quotes/:id/manual-rates', requirePermission('quote.manualRate'), (r
 
 router.put('/designs/:id/addons', (req, res) => {
   const d = designRow(req.params.id);
-  const addons = (Array.isArray(req.body?.addons) ? req.body.addons : [])
-    .map((a) => ({ name: str(a?.name, 80), amount: Number(a?.amount) || 0, basis: a?.basis === 'sqft' ? 'sqft' : 'unit' }))
-    .filter((a) => a.name);
+  const raw = Array.isArray(req.body?.addons) ? req.body.addons : [];
+  if (raw.length > 50) throw badRequest('A design can have up to 50 add-ons');
+  const addons = raw.map((a, i) => {
+    const name = str(a?.name, 80);
+    if (!name) throw badRequest(`Add-on ${i + 1} needs a name`);
+    const amount = Number(a?.amount);
+    if (a?.amount === '' || a?.amount == null || !Number.isFinite(amount)) throw badRequest(`Enter an amount for ${name}`);
+    return { name, amount, basis: a?.basis === 'sqft' ? 'sqft' : 'unit' };
+  });
   run('UPDATE designs SET addons = ?, updated_at = ? WHERE id = ?', JSON.stringify(addons), new Date().toISOString(), d.id);
   const calc = calculateQuote(d.quote_id);
   res.json({ ok: true, summary: calc.summary });
@@ -607,7 +637,8 @@ router.post('/quotes/:id/designs/preview', (req, res) => {
   const others = all('SELECT * FROM designs WHERE quote_id = ? AND id != ?', q.id, design.id).map(designRowToModel);
   const otherArea = others.reduce((s, o) => s + bomForDesign(o, catalog, overrides, levelPrices).areaSqft * o.qty, 0);
   const totalArea = otherArea + bom.areaSqft * design.qty;
-  const price = priceDesign(bom, heads, { calcType: 'auto', areaShare: totalArea ? bom.areaSqft / totalArea : 0, qty: design.qty });
+  const areaShare = totalArea ? bom.areaSqft / totalArea : 0;
+  const price = priceDesign(withItemShare(bom, quoteItemVars(loadQuoteItems(q.id)), areaShare), heads, { calcType: 'auto', areaShare, qty: design.qty });
   res.json({
     areaSqft: bom.areaSqft,
     areaSqm: bom.areaSqm,
@@ -842,7 +873,7 @@ export function reportData(quoteId) {
   const calc = calculateQuote(quoteId, { persist: false });
   if (!calc) throw notFound('Quote');
   const company = getSetting('company', DEFAULT_COMPANY);
-  const lines = aggregateLines(calc.designs);
+  const lines = [...aggregateLines(calc.designs), ...quoteItemLines(calc.quoteItems)];
   const designs = calc.designs.map((d) => ({
     ...designDTO(d, calc.catalog),
     bom: d.bom,
@@ -861,6 +892,7 @@ export function reportData(quoteId) {
       glass: lines.filter((l) => (l.category === 'glass' || l.category === 'mesh') && l.rate === 0).map((l) => ({ code: l.code, name: l.name })),
     },
     manualDesigns: designs.filter((d) => d.calcType === 'manual').map((d) => ({ ref: d.ref, name: d.name, basic: d.price.basic * d.qty })),
+    addedItems: calc.quoteItems,
     generatedAt: new Date().toISOString(),
   };
 }

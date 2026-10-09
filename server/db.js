@@ -266,6 +266,46 @@ CREATE TABLE IF NOT EXISTS saved_views (
 `;
 db.exec(SCHEMA_V2);
 
+// Custom entries: lines added to a quote's rate pages, and standalone contacts.
+const SCHEMA_V3 = `
+CREATE TABLE IF NOT EXISTS quote_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+  category TEXT NOT NULL,
+  code TEXT,
+  name TEXT NOT NULL,
+  color TEXT,
+  unit TEXT NOT NULL DEFAULT 'Pcs',
+  qty REAL NOT NULL DEFAULT 1,
+  rate REAL NOT NULL DEFAULT 0,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_quote_items_quote ON quote_items(quote_id);
+CREATE TABLE IF NOT EXISTS contacts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  salutation TEXT NOT NULL DEFAULT 'Mr.',
+  first_name TEXT NOT NULL,
+  last_name TEXT,
+  phone_code TEXT NOT NULL DEFAULT '+91',
+  phone TEXT NOT NULL,
+  email TEXT,
+  company TEXT,
+  designation TEXT,
+  city TEXT,
+  state TEXT,
+  address TEXT,
+  note TEXT,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
+`;
+db.exec(SCHEMA_V3);
+
 /** Add a column to an existing table if it is missing (idempotent migration helper). */
 function addColumn(table, column, ddl) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
@@ -285,6 +325,8 @@ addColumn('colors', 'hw_color', "TEXT NOT NULL DEFAULT 'BROWN'");
 addColumn('opportunities', 'account', 'TEXT');
 addColumn('opportunities', 'tags', "TEXT NOT NULL DEFAULT '[]'");
 addColumn('opportunities', 'competitor', 'TEXT');
+// guided tour progress per user: { finishedAt?, skippedAt?, done: string[] } – empty means a new user
+addColumn('users', 'tour_state', "TEXT NOT NULL DEFAULT '{}'");
 
 /** Run fn inside a transaction; rolls back on error. */
 export function tx(fn) {

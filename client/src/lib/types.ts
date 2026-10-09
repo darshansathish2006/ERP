@@ -10,6 +10,16 @@ export interface User {
   phone: string | null;
   /** Present on the signed-in user only. */
   permissions?: Partial<Record<PermissionKey, boolean>>;
+  /** Guided tour progress – present on the signed-in user only. */
+  tour?: TourState;
+}
+
+/** Guided tour progress. A user with neither finishedAt nor skippedAt is new and sees the welcome tour. */
+export interface TourState {
+  finishedAt: string | null;
+  skippedAt: string | null;
+  /** Ids of the tour chapters the user has completed. */
+  done: string[];
 }
 
 export interface SystemDef {
@@ -88,6 +98,8 @@ export interface Company {
   partnerLogo?: string;
   headerImage?: string;
   bank: { accountName: string; accountNo: string; bankName: string; ifsc: string; branch: string };
+  /** Other bank accounts; the one in `bank` is the primary account printed on the quotation. */
+  bankAccounts?: { accountName: string; accountNo: string; bankName: string; ifsc: string; branch: string }[];
   quoteValidityDays: number;
   /** Covering letter paragraphs on page 1. Lines starting with "a. " / "b. " are indented sub-points. */
   letter?: string[];
@@ -323,6 +335,8 @@ export interface Design {
   warnings: string[];
   createdAt: string;
   updatedAt: string;
+  /** Per-unit share of the entries added on the quote's rate pages (₹, raw material). */
+  addedShare?: number;
 }
 
 export interface CostHead {
@@ -334,6 +348,10 @@ export interface CostHead {
   visibility: 'hidden' | 'summary';
   remark?: string;
   userRights?: string;
+  /** A charge added to this quote only (Pricing → Add cost head). */
+  added?: boolean;
+  /** The subtotal head the added charge is summed into. */
+  addedTo?: string;
 }
 
 export interface SummaryHead extends CostHead {
@@ -352,6 +370,8 @@ export interface QuoteSummary {
   sqftRateWithTax: number;
   sqmRateWithTax: number;
   errors: string[];
+  /** Entries added on the rate pages: count and raw-material amount. */
+  addedItems?: { count: number; amount: number };
 }
 
 export interface QuoteHeader {
@@ -421,6 +441,54 @@ export interface BomLine {
   amount: number;
   /** WHITE / BROWN / BLACK for hardware, "Inside-X, Outside-Y" for profiles. */
   color?: string;
+  /** A custom entry added on the quote's rate pages (report lines only). */
+  added?: boolean;
+  id?: number;
+}
+
+/** Rate-page category of a custom quote entry. */
+export type QuoteItemCategory = 'profile' | 'aluminium' | 'reinforcement' | 'hardware' | 'glass' | 'mesh';
+
+/** A custom line added to a quote on Pricing → Profile / Reinforcement / Hardware / Glass / Mesh rate. */
+export interface QuoteItem {
+  id: number;
+  category: QuoteItemCategory;
+  code: string;
+  name: string;
+  color: string;
+  unit: string;
+  qty: number;
+  rate: number;
+  amount: number;
+  sort: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A row of the Contacts page: a standalone contact or a contact held on opportunities. */
+export interface ContactRow {
+  key: string;
+  source: 'contact' | 'opportunity';
+  id: number | null;
+  salutation: string;
+  firstName: string;
+  lastName: string;
+  name: string;
+  phoneCode: string;
+  phone: string;
+  email: string;
+  company: string;
+  designation: string;
+  city: string;
+  state: string;
+  address: string;
+  note: string;
+  opportunities: number;
+  won: number;
+  opportunityIds: number[];
+  lastOpportunityId: number | null;
+  lastActivity: string | null;
+  createdAt: string | null;
 }
 
 export interface CutLine {
@@ -495,6 +563,8 @@ export interface ReportData {
   bars: ProfileBar[];
   zeroRate: { profile: { code: string; name: string }[]; hardware: { code: string; name: string }[]; glass: { code: string; name: string }[] };
   manualDesigns: { ref: string; name: string; basic: number }[];
+  /** Entries added on the quote's rate pages. */
+  addedItems?: QuoteItem[];
   generatedAt: string;
 }
 
